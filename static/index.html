@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MedGemma RAG — Clinical AI & Evidence Verification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+<!-- ── AUTH GATE ──────────────────────────────────────────────────────── -->
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <div class="gate-brand">
+      <div class="brand-badge">⚡ MedGemma RAG</div>
+      <h1 class="gate-title">Clinical Decision Support &amp; Triage</h1>
+      <p class="gate-sub">Hybrid Retrieval (BM25 + S-PubMedBERT + MedCPT) with Multi-Agent Safety Verification &amp; Colab MedGemma</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button id="tab-login-btn" class="auth-tab active" onclick="switchAuthTab('login')">Sign In</button>
+      <button id="tab-reg-btn" class="auth-tab" onclick="switchAuthTab('register')">Create Account</button>
+    </div>
+
+    <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+      <div class="field">
+        <label for="g-user">Username</label>
+        <input id="g-user" required autocomplete="username" placeholder="e.g. dr_smith or patient_jane" spellcheck="false" />
+      </div>
+      <div class="field" id="email-field" style="display:none;">
+        <label for="g-email">Email (optional)</label>
+        <input id="g-email" type="email" placeholder="user@clinic.org" />
+      </div>
+      <div class="field">
+        <label for="g-pass">Password</label>
+        <input id="g-pass" required type="password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+
+      <div class="gate-actions">
+        <button id="btn-submit-auth" type="submit" class="btn btn-primary btn-block">Sign In to Console</button>
+      </div>
+    </form>
+    <p id="gate-msg" class="msg"></p>
+  </div>
+</div>
+
+<!-- ── MAIN APP CONSOLE ────────────────────────────────────────────────── -->
+<div id="app" class="app hidden">
+
+  <!-- TOP APP HEADER -->
+  <header class="top-nav">
+    <div class="nav-left">
+      <div class="app-logo">
+        <span class="logo-icon">🩺</span>
+        <div>
+          <span class="logo-text">MedGemma RAG</span>
+          <span class="logo-sub">Colab Engine</span>
+        </div>
+      </div>
+      <div class="mode-selector">
+        <button id="mode-patient" class="mode-btn active" onclick="setMode('patient')">🧑‍⚕️ Patient Triage</button>
+        <button id="mode-clinician" class="mode-btn" onclick="setMode('clinician')">🔬 Clinician QA</button>
+      </div>
+    </div>
+
+    <div class="nav-center">
+      <div class="health-indicators">
+        <div id="status-colab" class="health-chip chip-pending" title="Colab ngrok MedGemma tunnel">
+          <span class="status-dot"></span> Colab MedGemma: <strong id="lbl-colab-status">Checking...</strong>
+        </div>
+        <div id="status-rag" class="health-chip chip-ok" title="ChromaDB + BM25 + MedCPT">
+          <span class="status-dot"></span> RAG Engine: <strong id="lbl-rag-status">Ready</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-right">
+      <div class="user-pill">
+        <span class="user-avatar" id="avatar-initial">U</span>
+        <span class="user-name" id="who-name">—</span>
+        <button id="btn-logout" class="btn-icon" title="Sign out" onclick="logout()">🚪</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- WORKSPACE BODY -->
+  <div class="workspace">
+
+    <!-- LEFT SIDEBAR: Consultations & Intake -->
+    <aside class="sidebar-left">
+      <div class="sidebar-section-head">
+        <h3>Consultation History</h3>
+        <button id="btn-new-chat" class="btn btn-xs btn-outline" onclick="startNewConversation()">+ New</button>
+      </div>
+      <div id="conversations-list" class="conversations-list">
+        <div class="empty-state-sm">Loading consultations...</div>
+      </div>
+
+      <hr class="sidebar-divider" />
+
+      <div class="sidebar-section-head">
+        <h3>Patient Intake Profile</h3>
+        <span class="badge-live" title="Auto-extracted in real-time as patient describes symptoms">LIVE NER</span>
+      </div>
+      <div class="intake-form">
+        <div class="form-row-2">
+          <div class="field-sm">
+            <label>Age</label>
+            <input id="p-age" placeholder="e.g. 45" />
+          </div>
+          <div class="field-sm">
+            <label>Sex</label>
+            <input id="p-sex" placeholder="Male / Female" />
+          </div>
+        </div>
+        <div class="field-sm">
+          <label>Duration</label>
+          <input id="p-duration" placeholder="e.g. 3 days" />
+        </div>
+        <div class="field-sm">
+          <label>Existing Conditions</label>
+          <input id="p-conditions" placeholder="e.g. Type 2 Diabetes, HTN" />
+        </div>
+        <div class="field-sm">
+          <label>Current Medications</label>
+          <input id="p-medications" placeholder="e.g. Metformin 500mg, Lisinopril" />
+        </div>
+        <button id="btn-update-intake" class="btn btn-xs btn-primary btn-block" onclick="saveIntakeProfile()">Update Profile</button>
+      </div>
+    </aside>
+
+    <!-- CENTER STAGE: Chat & Real-Time Evidence -->
+    <main class="chat-stage">
+      <!-- Live Triage / Guardrail Banner (Dynamic) -->
+      <div id="banner-triage" class="alert-banner alert-emergency hidden">
+        <div class="alert-icon">🚨</div>
+        <div class="alert-body">
+          <h4>EMERGENCY MEDICAL WARNING DETECTED</h4>
+          <p id="banner-triage-text">Acute red flags identified. Emergency escalation protocol triggered.</p>
+        </div>
+      </div>
+
+      <div id="banner-guardrail" class="alert-banner alert-warning hidden">
+        <div class="alert-icon">⛔</div>
+        <div class="alert-body">
+          <h4>SAFETY GUARDRAIL INTERCEPTED</h4>
+          <p id="banner-guardrail-text">Dangerous contraindication or unsafe dosage blocked prior to retrieval.</p>
+        </div>
+      </div>
+
+      <!-- Messages Thread -->
+      <div id="messages-container" class="messages-container">
+        <div class="welcome-card">
+          <h2>Medical Multimodal RAG &amp; Multi-Agent Verification</h2>
+          <p>This system couples <strong>MedGemma</strong> with hybrid retrieval (30,980+ StatPearls, OpenFDA, and MedQuAD chunks) and multi-agent safety filters.</p>
+          <div class="quick-prompts">
+            <button class="quick-chip" onclick="fillPrompt('For 3 days I have had a crushing retrosternal chest pain radiating to my left arm with cold sweats.')">🚨 Cardiac Red-Flag</button>
+            <button class="quick-chip" onclick="fillPrompt('I am 8 weeks pregnant and was prescribed Warfarin for a leg blood clot. Is this safe?')">⛔ Teratogenic Guardrail</button>
+            <button class="quick-chip" onclick="fillPrompt('I have mild kidney disease (eGFR 48) and started Metformin 500mg. What are the dosage guidelines and lactic acidosis precautions?')">📚 Clinical Guideline RAG</button>
+            <button class="quick-chip" onclick="fillPrompt('Can you provide a structured intake summary and questions to ask my doctor for frequent night urination and tiredness?')">📋 Structured Report</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Composer Input -->
+      <div class="chat-composer">
+        <div class="composer-box">
+          <textarea id="chat-input" rows="2" placeholder="Describe symptoms, ask a clinical question, or paste a medical vignette..." onkeydown="handleInputKeyDown(event)"></textarea>
+          <div class="composer-actions">
+            <span class="key-hint">Enter to send · Shift+Enter for new line</span>
+            <button id="btn-send" class="btn btn-primary" onclick="sendMessage()">
+              <span>Send Message</span> 🚀
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT RAIL: Corpus Explorer, Drug Check & Evaluation -->
+    <aside class="sidebar-right">
+      <div class="right-tabs">
+        <button id="rtab-evidence" class="rtab active" onclick="switchRightTab('evidence')">📚 Evidence</button>
+        <button id="rtab-drugs" class="rtab" onclick="switchRightTab('drugs')">💊 Drug Check</button>
+        <button id="rtab-eval" class="rtab" onclick="switchRightTab('eval')">📊 Benchmark</button>
+      </div>
+
+      <!-- Tab 1: Live Evidence / Corpus Explorer -->
+      <div id="panel-evidence" class="panel-content active">
+        <div class="panel-head">
+          <h4>Retrieved Context &amp; Search</h4>
+        </div>
+        <div class="search-box-sm">
+          <input id="evidence-search-input" placeholder="Search StatPearls/OpenFDA corpus..." onkeyup="if(event.key==='Enter') runCorpusSearch()" />
+          <button class="btn btn-xs btn-outline" onclick="runCorpusSearch()">Search</button>
+        </div>
+        <div id="evidence-list" class="evidence-list">
+          <div class="empty-state-sm">Retrieved guidelines and source citations will appear here during chat or search.</div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Prescriptions Checker -->
+      <div id="panel-drugs" class="panel-content">
+        <div class="panel-head">
+          <h4>Prescriptions &amp; Contraindications</h4>
+        </div>
+        <div class="field-sm">
+          <label>Medications (comma-separated)</label>
+          <textarea id="check-meds" rows="2" placeholder="e.g. Warfarin, Metformin, Ibuprofen"></textarea>
+        </div>
+        <div class="field-sm">
+          <label>Conditions / Status</label>
+          <input id="check-conditions" placeholder="e.g. Pregnancy, eGFR 25, active ulcer" />
+        </div>
+        <button class="btn btn-xs btn-primary btn-block" onclick="runDrugCheck()">Audit Drug Safety</button>
+        <div id="drug-check-result" class="drug-check-result"></div>
+      </div>
+
+      <!-- Tab 3: Benchmark & Evaluation Dashboard -->
+      <div id="panel-eval" class="panel-content">
+        <div class="panel-head">
+          <h4>RAG Evaluation Benchmark</h4>
+        </div>
+        <div id="eval-metrics" class="eval-metrics-box">
+          <div class="metric-card">
+            <span class="metric-val">100%</span>
+            <span class="metric-lbl">Recall @ 5</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val">97.6%</span>
+            <span class="metric-lbl">Faithfulness</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val">100%</span>
+            <span class="metric-lbl">Emergency Triage</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val">100%</span>
+            <span class="metric-lbl">Guardrail Intercept</span>
+          </div>
+        </div>
+        <div id="eval-details" class="eval-details-box"></div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
