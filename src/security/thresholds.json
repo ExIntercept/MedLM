@@ -1,0 +1,18 @@
+{
+  "pg_block": 0.9,
+  "pg_flag": 0.5,
+  "tm_block": 0.78,
+  "tm_flag": 0.68,
+  "tau_component": 0.62,
+  "components_block": 3,
+  "components_flag": 2,
+  "_meta": {
+    "calibrated_at": "2026-10-14T20:03:37.554276+00:00",
+    "val_templates_evaluated": 31,
+    "benign_queries_evaluated": 26,
+    "val_block_recall": 0.129,
+    "val_attack_recall": 0.258,
+    "val_benign_block_fpr": 0.0,
+    "val_benign_flag_fpr": 0.0
+  }
+}

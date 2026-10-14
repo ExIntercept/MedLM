@@ -361,7 +361,10 @@ function handleSSEEvent(event, rawData, bubbleEl, setTextCallback) {
       activeStreamText = "";
       bubbleEl.innerHTML = "";
     }
-    const token = typeof data === "string" ? data : (data && data.text) || "";
+    const token =
+      data && typeof data === "object" && typeof data.text === "string"
+        ? data.text
+        : (rawData ?? "");
     activeStreamText += token;
     bubbleEl.innerHTML = marked.parse(activeStreamText);
     setTextCallback(activeStreamText);
@@ -533,4 +536,254 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// ── SECURITY & AUDIT MODAL LOGIC ─────────────────────────────────────────
+let currentDefenseLogs = [];
+let activeDefenseFilter = "ALL";
+
+function toggleSecurityModal() {
+  const modal = document.getElementById("security-modal");
+  if (!modal) return;
+  const isOpening = modal.classList.contains("hidden");
+  modal.classList.toggle("hidden");
+  if (isOpening) {
+    loadDefenseLogs();
+    loadDefenseConfig();
+  }
+}
+
+// Close modal when clicking outside of dialog container
+window.addEventListener("click", (e) => {
+  const modal = document.getElementById("security-modal");
+  if (modal && e.target === modal) {
+    modal.classList.add("hidden");
+  }
+});
+
+// Close modal on Escape key
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    const modal = document.getElementById("security-modal");
+    if (modal && !modal.classList.contains("hidden")) {
+      modal.classList.add("hidden");
+    }
+  }
+});
+
+function switchSecTab(tab) {
+  const tabLogs = document.getElementById("sec-tab-logs");
+  const tabConfig = document.getElementById("sec-tab-config");
+  const viewLogs = document.getElementById("sec-view-logs");
+  const viewConfig = document.getElementById("sec-view-config");
+
+  if (tab === "logs") {
+    if (tabLogs) tabLogs.classList.add("active");
+    if (tabConfig) tabConfig.classList.remove("active");
+    if (viewLogs) viewLogs.classList.remove("hidden");
+    if (viewConfig) viewConfig.classList.add("hidden");
+    loadDefenseLogs();
+  } else {
+    if (tabLogs) tabLogs.classList.remove("active");
+    if (tabConfig) tabConfig.classList.add("active");
+    if (viewLogs) viewLogs.classList.add("hidden");
+    if (viewConfig) viewConfig.classList.remove("hidden");
+    loadDefenseConfig();
+  }
+}
+
+function filterLogs(filter) {
+  activeDefenseFilter = filter;
+  ["all", "block", "flag", "allow"].forEach((f) => {
+    const btn = document.getElementById(`filter-${f}`);
+    if (btn) btn.classList.toggle("active", f.toUpperCase() === filter);
+  });
+  renderDefenseLogs();
+}
+
+async function loadDefenseLogs() {
+  const container = document.getElementById("defense-log-list");
+  if (!container) return;
+
+  try {
+    const res = await fetch("/api/admin/defense-log?limit=100", {
+      headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : {},
+    });
+    if (!res.ok) throw new Error("Failed to load logs");
+    const data = await res.json();
+    currentDefenseLogs = data.logs || [];
+    renderDefenseLogs();
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state-sm" style="color: var(--accent-err);">Error loading logs: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderDefenseLogs() {
+  const container = document.getElementById("defense-log-list");
+  if (!container) return;
+
+  const filtered = currentDefenseLogs.filter((log) => {
+    if (activeDefenseFilter === "ALL") return true;
+    return log.action === activeDefenseFilter;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="empty-state-sm">No defense events recorded ${activeDefenseFilter !== "ALL" ? `for ${activeDefenseFilter}` : ""}.</div>`;
+    return;
+  }
+
+  let html = `
+    <table class="defense-log-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Action</th>
+          <th>Category</th>
+          <th>Similarity</th>
+          <th>Components</th>
+          <th>Notes / Reason</th>
+          <th>User Input Excerpt</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const log of filtered) {
+    const dt = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—";
+    let badgeClass = "badge-allow";
+    if (log.action === "BLOCK") badgeClass = "badge-block";
+    else if (log.action === "FLAG") badgeClass = "badge-flag";
+
+    const sim = log.tm_max_sim !== undefined ? Number(log.tm_max_sim).toFixed(3) : "—";
+    const pgScore = log.pg_score !== null && log.pg_score !== undefined ? Number(log.pg_score).toFixed(3) : null;
+    const simDisplay = pgScore !== null ? `TM: ${sim}<br><small style="color: var(--text-muted);">PG: ${pgScore}</small>` : `TM: ${sim}`;
+
+    const comps = log.tm_n_components !== undefined ? log.tm_n_components : 0;
+
+    const reasons = (log.reasons || []).join(", ");
+    const notes = (log.sanitize_notes || []).join(", ");
+    const reasonText = [notes, reasons].filter(Boolean).join(" | ") || "—";
+
+    const excerpt = log.message_excerpt || log.message_snippet || "—";
+
+    html += `
+      <tr>
+        <td style="white-space: nowrap; font-family: monospace; font-size: 11px;">${escapeHtml(dt)}</td>
+        <td><span class="${badgeClass}">${escapeHtml(log.action)}</span></td>
+        <td style="font-size: 11px; font-weight: 600; color: #94a3b8;">${escapeHtml(log.category || "—")}</td>
+        <td style="font-family: monospace; font-size: 11px;">${simDisplay}</td>
+        <td style="text-align: center; font-weight: 600;">${comps}</td>
+        <td style="font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(reasonText)}">${escapeHtml(reasonText)}</td>
+        <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #cbd5e1;" title="${escapeHtml(excerpt)}">${escapeHtml(excerpt)}</td>
+      </tr>
+    `;
+  }
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+}
+
+async function loadDefenseConfig() {
+  try {
+    const res = await fetch("/api/admin/defense-config", {
+      headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : {},
+    });
+    if (!res.ok) throw new Error("Failed to load defense config");
+    const data = await res.json();
+
+    const toggles = data.toggles || {};
+    const setCheck = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = Boolean(val);
+    };
+
+    setCheck("toggle-defense-master", toggles.defense_enabled ?? true);
+    setCheck("toggle-layer-sanitize", toggles.layer_sanitize ?? true);
+    setCheck("toggle-layer-pg", toggles.layer_prompt_guard ?? true);
+    setCheck("toggle-layer-tm", toggles.layer_template_matcher ?? true);
+    setCheck("toggle-layer-hardening", toggles.layer_prompt_hardening ?? true);
+    setCheck("toggle-layer-triage", toggles.layer_triage ?? true);
+    setCheck("toggle-layer-guardrails", toggles.layer_guardrails ?? true);
+
+    const pgBadge = document.getElementById("pg-status-badge");
+    if (pgBadge) {
+      if (data.prompt_guard_status === "READY") {
+        pgBadge.textContent = "Active (DeBERTa-v3 neural injection classifier online)";
+        pgBadge.style.color = "#34d399";
+      } else if (data.prompt_guard_status === "UNAVAILABLE") {
+        pgBadge.textContent = "Offline";
+        pgBadge.style.color = "#f87171";
+      } else {
+        pgBadge.textContent = "Neural classifier (" + data.prompt_guard_status + ")";
+      }
+    }
+
+    const th = data.thresholds || {};
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val !== undefined) el.value = val;
+    };
+    setVal("th-tm-block", th.tm_block ?? 0.78);
+    setVal("th-tm-flag", th.tm_flag ?? 0.68);
+    setVal("th-comp-block", th.components_block ?? 3);
+    setVal("th-comp-flag", th.components_flag ?? 2);
+  } catch (err) {
+    console.error("Error loading defense config:", err);
+  }
+}
+
+async function updatePipelineToggle(key, value) {
+  try {
+    const res = await fetch("/api/admin/defense-config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+      },
+      body: JSON.stringify({ toggles: { [key]: value } }),
+    });
+    if (!res.ok) throw new Error("Failed to update toggle");
+  } catch (err) {
+    alert("Error updating pipeline toggle: " + err.message);
+  }
+}
+
+async function saveThresholds() {
+  const msgEl = document.getElementById("thresh-save-msg");
+  if (msgEl) msgEl.textContent = "Saving...";
+
+  try {
+    const tm_block = parseFloat(document.getElementById("th-tm-block").value);
+    const tm_flag = parseFloat(document.getElementById("th-tm-flag").value);
+    const components_block = parseInt(document.getElementById("th-comp-block").value, 10);
+    const components_flag = parseInt(document.getElementById("th-comp-flag").value, 10);
+
+    const payload = {
+      thresholds: {
+        tm_block,
+        tm_flag,
+        components_block,
+        components_flag,
+      },
+    };
+
+    const res = await fetch("/api/admin/defense-config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to save thresholds");
+
+    if (msgEl) {
+      msgEl.textContent = "Saved successfully!";
+      setTimeout(() => {
+        msgEl.textContent = "";
+      }, 3000);
+    }
+  } catch (err) {
+    if (msgEl) msgEl.textContent = "Error: " + err.message;
+  }
 }

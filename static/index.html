@@ -78,6 +78,7 @@
     </div>
 
     <div class="nav-right">
+      <button id="btn-security" class="security-toggle-btn" onclick="toggleSecurityModal()" title="Inspect Defense Logs & Pipeline Controls">🛡️ Security &amp; Audit</button>
       <div class="user-pill">
         <span class="user-avatar" id="avatar-initial">U</span>
         <span class="user-name" id="who-name">—</span>
@@ -244,6 +245,128 @@
         <div id="eval-details" class="eval-details-box"></div>
       </div>
     </aside>
+
+  </div>
+</div>
+
+<!-- ── SECURITY & AUDIT MODAL ──────────────────────────────────────── -->
+<div id="security-modal" class="modal-overlay hidden">
+  <div class="modal-container">
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2>🛡️ Pipeline Security &amp; Audit Console</h2>
+        <span class="modal-subtitle">Real-time prompt injection &amp; jailbreak inspection + live layer toggles</span>
+      </div>
+      <button class="btn-icon" onclick="toggleSecurityModal()" style="font-size: 16px; cursor: pointer;">✕</button>
+    </div>
+
+    <!-- TABS: Logs vs Controls -->
+    <div class="modal-tabs">
+      <button id="sec-tab-logs" class="modal-tab active" onclick="switchSecTab('logs')">📜 Defense Decision Logs</button>
+      <button id="sec-tab-config" class="modal-tab" onclick="switchSecTab('config')">⚙️ Pipeline Controls &amp; Ablation</button>
+    </div>
+
+    <!-- TAB 1: LOGS -->
+    <div id="sec-view-logs" class="modal-body">
+      <div class="log-toolbar">
+        <div class="log-filters">
+          <button id="filter-all" class="chip active" onclick="filterLogs('ALL')">All</button>
+          <button id="filter-block" class="chip" onclick="filterLogs('BLOCK')">Blocked</button>
+          <button id="filter-flag" class="chip" onclick="filterLogs('FLAG')">Flagged</button>
+          <button id="filter-allow" class="chip" onclick="filterLogs('ALLOW')">Allowed</button>
+        </div>
+        <button class="btn btn-xs btn-outline" onclick="loadDefenseLogs()">🔄 Refresh Logs</button>
+      </div>
+      <div id="defense-log-list" class="defense-log-table-wrapper">
+        <div class="empty-state-sm">Loading security logs...</div>
+      </div>
+    </div>
+
+    <!-- TAB 2: CONTROLS & ABLATION -->
+    <div id="sec-view-config" class="modal-body hidden">
+      <div class="config-section">
+        <h3>Pipeline Layer Toggles</h3>
+        <p class="config-desc">Enable or bypass individual layers in real-time. Changes apply immediately to the next query without restarting.</p>
+        <div class="toggle-grid">
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-defense-master" onchange="updatePipelineToggle('defense_enabled', this.checked)">
+            <div>
+              <strong>Master Defense Pipeline</strong>
+              <span>Turn all Layer A/B input defenses ON or OFF</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-sanitize" onchange="updatePipelineToggle('layer_sanitize', this.checked)">
+            <div>
+              <strong>Layer S: Input Sanitizer</strong>
+              <span>Strip invisible chars, normalize control tokens</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-pg" onchange="updatePipelineToggle('layer_prompt_guard', this.checked)">
+            <div>
+              <strong>Layer A: Neural Injection Classifier</strong>
+              <span id="pg-status-badge">DeBERTa-v3 neural malicious sequence classifier</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-tm" onchange="updatePipelineToggle('layer_template_matcher', this.checked)">
+            <div>
+              <strong>Layer B: Template Matcher</strong>
+              <span>Semantic similarity vs. 203-record jailbreak corpus</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-hardening" onchange="updatePipelineToggle('layer_prompt_hardening', this.checked)">
+            <div>
+              <strong>Layer C: Prompt Hardening</strong>
+              <span>Nonce tags &amp; POST_RULES in system prompt</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-triage" onchange="updatePipelineToggle('layer_triage', this.checked)">
+            <div>
+              <strong>Layer 0: Emergency Triage</strong>
+              <span>Cardiovascular / stroke red-flag escalation</span>
+            </div>
+          </label>
+          <label class="toggle-card">
+            <input type="checkbox" id="toggle-layer-guardrails" onchange="updatePipelineToggle('layer_guardrails', this.checked)">
+            <div>
+              <strong>Layer 1: Contraindication Guardrails</strong>
+              <span>Warfarin, metformin, potassium push interceptors</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3>Detection Thresholds</h3>
+        <p class="config-desc">Configure detection sensitivity. Lower values make detection more aggressive.</p>
+        <div class="thresholds-form">
+          <div class="thresh-field">
+            <label>Template Matcher BLOCK (tm_block)</label>
+            <input type="number" step="0.01" min="0" max="1" id="th-tm-block">
+          </div>
+          <div class="thresh-field">
+            <label>Template Matcher FLAG (tm_flag)</label>
+            <input type="number" step="0.01" min="0" max="1" id="th-tm-flag">
+          </div>
+          <div class="thresh-field">
+            <label>Components Count for BLOCK</label>
+            <input type="number" step="1" min="1" max="9" id="th-comp-block">
+          </div>
+          <div class="thresh-field">
+            <label>Components Count for FLAG</label>
+            <input type="number" step="1" min="1" max="9" id="th-comp-flag">
+          </div>
+          <div style="grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+            <button class="btn btn-sm btn-primary" onclick="saveThresholds()">Save Thresholds</button>
+            <span id="thresh-save-msg" class="save-msg"></span>
+          </div>
+        </div>
+      </div>
+    </div>
 
   </div>
 </div>

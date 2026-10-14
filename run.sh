@@ -15,4 +15,6 @@ if [ ! -f .env ]; then
 fi
 
 echo "Starting Medical RAG System on http://127.0.0.1:8600"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export NLTK_DATA="${NLTK_DATA:-.nltk_data}"
 exec ./.venv/bin/uvicorn src.api.server:app --host 127.0.0.1 --port 8600 --reload

@@ -38,3 +38,28 @@ RESERVE_OUTPUT_TOKENS = int(os.environ.get("RESERVE_OUTPUT_TOKENS", "640"))
 JWT_SECRET = os.environ.get("JWT_SECRET", os.environ.get("APP_SECRET", "dev-only-insecure-secret-change-in-production"))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+# ── Defense / Security pipeline ──────────────────────────────────────────────
+# Set DEFENSE_ENABLED=0 in .env to disable all layers (useful for ablation).
+DEFENSE_ENABLED = os.environ.get("DEFENSE_ENABLED", "1") == "1"
+
+# Layer A – Prompt Injection neural classifier (open-source DeBERTa-v3 or Llama-Prompt-Guard)
+PROMPT_GUARD_MODEL_ID = os.environ.get(
+    "PROMPT_GUARD_MODEL_ID", "ProtectAI/deberta-v3-base-prompt-injection-v2"
+)
+
+# Layer B – Template Matcher embedding model (all-MiniLM-L6-v2 is already cached)
+TEMPLATE_EMBED_MODEL_ID = os.environ.get(
+    "TEMPLATE_EMBED_MODEL_ID", "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+# Path to calibrated thresholds JSON; written by scripts/calibrate_defenses.py.
+# Falls back to hard-coded defaults in decision.py if the file is missing.
+DEFENSE_THRESHOLDS_PATH = ROOT / "src" / "security" / "thresholds.json"
+
+# JSONL log of every defense decision (one line per request).
+DEFENSE_LOG_PATH = DATA_DIR / "defense_log.jsonl"
+
+# Input size limits applied by the sanitizer.
+MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "6000"))
+MAX_PROFILE_FIELD_CHARS = int(os.environ.get("MAX_PROFILE_FIELD_CHARS", "300"))

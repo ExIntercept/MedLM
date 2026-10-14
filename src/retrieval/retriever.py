@@ -15,8 +15,19 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from src.config import CHROMA_DB_DIR, CORPUS_DIR
 
-nltk.download("stopwords", quiet=True)
-STOPWORDS = set(stopwords.words("english"))
+from pathlib import Path
+_local_nltk = Path(__file__).resolve().parent.parent.parent / ".nltk_data"
+if _local_nltk.exists() and str(_local_nltk) not in nltk.data.path:
+    nltk.data.path.insert(0, str(_local_nltk))
+
+try:
+    STOPWORDS = set(stopwords.words("english"))
+except Exception:
+    try:
+        nltk.download("stopwords", quiet=True)
+        STOPWORDS = set(stopwords.words("english"))
+    except Exception:
+        STOPWORDS = set()
 stemmer = PorterStemmer()
 
 SOURCE_WEIGHTS = {"StatPearls": 1.3, "OpenFDA": 1.1, "MedQuAD": 0.8}
@@ -108,6 +119,7 @@ def extract_intent(vignette_text: str) -> str:
         or _HAS_DIGIT.search(s)
         or any(med in s.lower() for med in KNOWN_MEDICATIONS)
     ]
+    intent_query = f"{presentation} {' '.join(findings)} {lead_in}".strip()
     # Query expansion for colloquial / ambiguous clinical terms
     expanded = intent_query
     if re.search(r"\bbicuspid\b", intent_query, re.I) and "aortic" not in intent_query.lower():

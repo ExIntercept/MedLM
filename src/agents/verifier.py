@@ -1,10 +1,21 @@
 """Evidence auditing and faithfulness verification."""
 import re
 import nltk
+from pathlib import Path
+_local_nltk = Path(__file__).resolve().parent.parent.parent / ".nltk_data"
+if _local_nltk.exists() and str(_local_nltk) not in nltk.data.path:
+    nltk.data.path.insert(0, str(_local_nltk))
+
 from nltk.corpus import stopwords
 
-nltk.download("stopwords", quiet=True)
-STOPWORDS = set(stopwords.words("english"))
+try:
+    STOPWORDS = set(stopwords.words("english"))
+except Exception:
+    try:
+        nltk.download("stopwords", quiet=True)
+        STOPWORDS = set(stopwords.words("english"))
+    except Exception:
+        STOPWORDS = set()
 
 OVERLAP_THRESHOLD = 0.18
 PASS_THRESHOLD = 0.50

@@ -5,15 +5,23 @@ import EvidenceAccordion from "./EvidenceAccordion";
 
 function AuditBadge({ audit }) {
   if (!audit) return null;
+  if (audit.status === "BLOCKED") {
+    return (
+      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+        Blocked · Security policy
+      </div>
+    );
+  }
   const tone =
     audit.status === "PASS"
       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
       : audit.status === "INTERCEPTED"
       ? "bg-red-50 text-red-700 border-red-200"
       : "bg-amber-50 text-amber-700 border-amber-200";
+  const scoreText = audit.score != null ? ` · Faithfulness ${(audit.score * 100).toFixed(0)}%` : "";
   return (
     <div className={cn("mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", tone)}>
-      {audit.status} · Faithfulness {(audit.score * 100).toFixed(0)}%
+      {audit.status}{scoreText}
     </div>
   );
 }

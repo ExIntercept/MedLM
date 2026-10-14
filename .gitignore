@@ -38,3 +38,10 @@ frontend/dist/
 .idea/
 *.log
 
+# Defense pipeline caches & offline data
+src/security/data/*.npy
+src/security/data/*.json
+!src/security/thresholds.json
+src/security/data/corpus_full.jsonl
+.nltk_data/
+

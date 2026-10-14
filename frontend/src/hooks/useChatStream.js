@@ -19,11 +19,10 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
       setError(null);
       setIsStreaming(true);
 
-      const history = messages.map(({ role, content }) => ({ role, content }));
       setMessages((prev) => [
         ...prev,
         { role: "user", content: message },
-        { role: "assistant", content: "", sources: [], audit: null, triage: null },
+        { role: "assistant", content: "", sources: [], audit: null, triage: null, security: null },
       ]);
 
       const controller = new AbortController();
@@ -44,7 +43,6 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
             conversation_id: conversationId,
             message,
             patient_profile: patientProfile,
-            history,
             mode,
           },
           ({ event, data }) => {
@@ -67,6 +65,12 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
                 patchAssistant({ triage: JSON.parse(data) });
               } catch (e) {
                 console.warn("Skipping unparseable 'triage_status' SSE payload:", data, e);
+              }
+            } else if (event === "security_status") {
+              try {
+                patchAssistant({ security: JSON.parse(data) });
+              } catch (e) {
+                console.warn("Skipping unparseable 'security_status' SSE payload:", data, e);
               }
             } else if (event === "token") {
               setMessages((prev) => {
