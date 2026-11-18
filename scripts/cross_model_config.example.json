@@ -1,0 +1,24 @@
+[
+  {
+    "model": "google/medgemma-4b-it",
+    "base_url": "https://your-medgemma-tunnel.ngrok-free.app",
+    "provider": "completions",
+    "api_key_env": "COLAB_API_KEY"
+  },
+  {
+    "model": "epfl-llm/meditron-7b",
+    "base_url": "https://your-meditron-tunnel.ngrok-free.app",
+    "provider": "completions",
+    "api_key_env": "COLAB_API_KEY"
+  },
+  {
+    "model": "BioMistral/BioMistral-7B",
+    "base_url": "http://localhost:8001",
+    "provider": "openai_chat"
+  },
+  {
+    "model": "aaditya/Llama3-OpenBioLLM-8B",
+    "base_url": "http://localhost:8002",
+    "provider": "openai_chat"
+  }
+]

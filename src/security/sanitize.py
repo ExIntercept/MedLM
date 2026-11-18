@@ -152,6 +152,17 @@ def neutralise_control_tokens(text: str) -> tuple[str, list[str]]:
     return text, notes
 
 
+def strip_control_tokens(text: str) -> str:
+    """Remove (not defang) every model family's control tokens and app tags.
+
+    Used on model *output*, where leftover template markers or echoed
+    delimiter tags are artifacts to delete rather than evidence to keep.
+    """
+    for pattern in (_GEMMA_TOKEN_RE, _CHATML_TOKEN_RE, _BRACKET_TOKEN_RE, _SYS_TOKEN_RE, _SEQ_TOKEN_RE, _APP_TAG_RE):
+        text = pattern.sub("", text)
+    return text
+
+
 def sanitize_text(text: str, max_chars: int) -> SanitizedField:
     """Sanitize a single text field, applying all rules in order.
 

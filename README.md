@@ -191,6 +191,35 @@ result = gateway.run("How is asthma managed?", mode="clinician")
 print(result.status, result.trace, result.response_text)
 ```
 
+### Supported medical models
+*File: `src/llm/model_profiles.py`*
+
+The gateway identifies the configured medical model from its ID and adapts automatically. Only the model-specific details change; the defense stages are the same for every model.
+
+| Model | Prompt format | Context | Notes |
+|---|---|---|---|
+| MedGemma (`google/medgemma-*`) | gemma | 8192 | Instruction-tuned |
+| Meditron-7B / 70B (`epfl-llm/meditron-*`) | plain | 2048 / 4096 | Base model, no system role |
+| BioMistral-7B | mistral | 2048 | No system role |
+| OpenBioLLM 8B / 70B | llama3 | 8192 | Instruction-tuned |
+| Med42-v2 (`m42-health/Llama3-Med42-*`) | llama3 | 8192 | Instruction-tuned |
+| PMC-LLaMA-13B | plain | 2048 | Base model |
+| ClinicalCamel-70B | plain | 4096 | |
+| HuatuoGPT-o1 (Qwen / Llama 3.1) | chatml / llama3 | 32768 | |
+
+For each model the gateway:
+- **Fits the context window.** For small-context models like Meditron or BioMistral (2048 tokens), it drops older history first, then lower-ranked evidence, then shortens evidence. The safety rules and delimiter tags are never trimmed.
+- **Cleans the output.** It removes leftover control tokens and echoed delimiter tags. For base models, it also cuts off any fabricated next turn (for example `User: ...`).
+- **Uses the right format.** It applies the correct prompt template and stop tokens, and merges the system prompt into the user message for models that do not accept a system role.
+
+To add an unlisted model, set `LLM_TEMPLATE` and `MAX_MODEL_LEN` in `.env`, or add one line to `MEDICAL_MODEL_PROFILES`.
+
+### Cross-model defense evaluation
+```bash
+python scripts/run_cross_model_eval.py --config scripts/cross_model_config.example.json
+```
+This runs the adversarial and benign battery against each listed medical model twice: once **undefended** (raw model) and once **defended** (through the gateway). It writes `docs/CROSS_MODEL_EVAL_REPORT.md` with a per-model comparison. `--stub` runs the same pipeline with a fake model and needs no GPU.
+
 ---
 
 ## 📁 Repository Structure

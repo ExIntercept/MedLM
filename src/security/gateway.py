@@ -21,6 +21,7 @@ any adapter (including :class:`~src.llm.adapters.CallableAdapter`).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -245,7 +246,40 @@ class ClinicalDefenseGateway:
         evidence: Evidence = []
         if self.retriever is not None:
             trace.append("retrieve")
-            evidence = self.retriever(vignette_text) or []
+            evidence = list(self.retriever(vignette_text) or [])
+
+        # ── 6. Prompt hardening, fitted to this model's context window ─
+        from src.agents.prompting import format_patient_profile
+
+        hardened = self._on("layer_prompt_hardening")
+        trace.append("harden" if hardened else "prompt")
+        profile_note = format_patient_profile(
+            **{k: (san.profile[k].model_text if k in san.profile else None)
+               for k in ("age", "sex", "duration", "conditions", "medications")}
+        )
+        forced_tone = "patient" if mode == "patient" else "clinical_qa"
+        model_profile = getattr(self.llm, "profile", None)
+        max_tokens = self.max_tokens
+        if model_profile is not None:
+            # Never let the output budget eat more than half of a small context.
+            max_tokens = min(max_tokens, model_profile.context_window // 2)
+
+        def compose(ev, hist, vignette):
+            if hardened:
+                from src.agents.prompting import build_messages
+
+                return build_messages(
+                    vignette, detected_options, _format_evidence(ev), hist,
+                    forced_tone=forced_tone, patient_profile_text=profile_note, flagged=flagged,
+                )
+            return _unhardened_messages(vignette, detected_options, _format_evidence(ev), hist, forced_tone, profile_note)
+
+        messages, evidence, fit_notes = fit_to_context(
+            compose, evidence, history, vignette_text, model_profile, max_tokens
+        )
+        if fit_notes:
+            trace.append("fit_context")
+
         sources = [
             {
                 "chunk_id": str(chunk_id),
@@ -257,44 +291,19 @@ class ClinicalDefenseGateway:
             for chunk_id, text, meta in evidence
         ]
         emit("sources", sources)
-        evidence_md = _format_evidence(evidence)
-
-        # ── 6. Prompt hardening (model-agnostic messages) ──────────────
-        from src.agents.prompting import build_messages, format_patient_profile
-
-        trace.append("harden" if self._on("layer_prompt_hardening") else "prompt")
-        profile_note = format_patient_profile(
-            **{k: (san.profile[k].model_text if k in san.profile else None)
-               for k in ("age", "sex", "duration", "conditions", "medications")}
-        )
-        forced_tone = "patient" if mode == "patient" else "clinical_qa"
-        if self._on("layer_prompt_hardening"):
-            messages = build_messages(
-                vignette_text,
-                detected_options,
-                evidence_md,
-                history,
-                forced_tone=forced_tone,
-                patient_profile_text=profile_note,
-                flagged=flagged,
-            )
-        else:
-            messages = _unhardened_messages(
-                vignette_text, detected_options, evidence_md, history, forced_tone, profile_note
-            )
 
         # ── 7. Generate (the only model-specific step) ─────────────────
         trace.append("generate")
         raw_answer = "".join(
-            self.llm.stream(messages, temperature=self.temperature, max_tokens=self.max_tokens)
+            self.llm.stream(messages, temperature=self.temperature, max_tokens=max_tokens)
         )
 
-        # ── 8. Output verification and gate ────────────────────────────
+        # ── 8. Output normalisation, verification and gate ─────────────
         from src.agents.prompting import sanitize_patient_output
         from src.agents.verifier import verify_evidence
 
         trace.append("verify")
-        answer = sanitize_patient_output(raw_answer)
+        answer = sanitize_patient_output(clean_model_output(raw_answer, model_profile))
         audit = verify_evidence(answer, evidence, vignette_text)
         withheld = audit["status"] == "FLAGGED"
         if withheld:
@@ -316,6 +325,8 @@ class ClinicalDefenseGateway:
                 "faithfulness_score": audit["score"],
                 "status": audit["status"],
                 "model": getattr(self.llm, "name", type(self.llm).__name__),
+                "model_family": model_profile.family if model_profile else None,
+                "context_fit": fit_notes,
                 "security": {
                     "action": decision.action if decision else "BYPASSED",
                     "pg": decision.pg_score if decision else None,
@@ -353,3 +364,110 @@ def _unhardened_messages(vignette_text, detected_options, evidence_md, history, 
         hardened=False,
     )
     return [{"role": "user", "content": prompt}]
+
+
+# ---------------------------------------------------------------------------
+# Model-specific adaptation (driven by ModelProfile, never by model name)
+# ---------------------------------------------------------------------------
+
+_MESSAGE_OVERHEAD_TOKENS = 8
+_SAFETY_MARGIN = 0.92  # token estimates are approximate; stay under the limit
+
+
+def estimate_tokens(messages: list, chars_per_token: float = 3.4) -> int:
+    return sum(int(len(m["content"]) / chars_per_token) + _MESSAGE_OVERHEAD_TOKENS for m in messages)
+
+
+def fit_to_context(compose, evidence, history, vignette, model_profile, max_tokens):
+    """Shrink the prompt until it fits ``context_window - max_tokens``.
+
+    Small-context medical models (Meditron-7B, BioMistral: 2048 tokens) cannot
+    take the full hardened prompt. Content is dropped in order of least
+    clinical value: older history, then lower-ranked evidence, then evidence
+    length, and only as a last resort the user's own question. The safety
+    instructions and delimiter rules are never trimmed.
+
+    Returns ``(messages, evidence_used, notes)``.
+    """
+    messages = compose(evidence, history, vignette)
+    if model_profile is None:
+        return messages, evidence, []
+
+    budget = int((model_profile.context_window - max_tokens) * _SAFETY_MARGIN)
+    cpt = model_profile.chars_per_token
+
+    def fits(msgs):
+        return estimate_tokens(msgs, cpt) <= budget
+
+    notes: list[str] = []
+    if fits(messages):
+        return messages, evidence, notes
+
+    # 1. Drop older history, keeping the most recent exchange as long as possible.
+    for keep in (2, 0):
+        if len(history) > keep:
+            history = history[-keep:] if keep else []
+            notes.append(f"history_kept:{keep}")
+            messages = compose(evidence, history, vignette)
+            if fits(messages):
+                return messages, evidence, notes
+
+    # 2. Drop lowest-ranked evidence chunks (retriever returns best first).
+    while len(evidence) > 1:
+        evidence = evidence[:-1]
+        notes.append(f"evidence_kept:{len(evidence)}")
+        messages = compose(evidence, history, vignette)
+        if fits(messages):
+            return messages, evidence, notes
+
+    # 3. Shorten the remaining evidence chunk.
+    if evidence:
+        chunk_id, text, meta = evidence[0]
+        overflow_chars = int((estimate_tokens(messages, cpt) - budget) * cpt) + 50
+        new_len = max(200, len(text) - overflow_chars)
+        if new_len < len(text):
+            evidence = [(chunk_id, text[:new_len].rsplit(" ", 1)[0] + " ...", meta)]
+            notes.append(f"evidence_truncated:{new_len}")
+            messages = compose(evidence, history, vignette)
+            if fits(messages):
+                return messages, evidence, notes
+
+    # 4. Last resort: shorten the user's question itself.
+    overflow_chars = int((estimate_tokens(messages, cpt) - budget) * cpt) + 50
+    if overflow_chars > 0 and len(vignette) > 200:
+        vignette = vignette[: max(200, len(vignette) - overflow_chars)]
+        notes.append("question_truncated")
+        messages = compose(evidence, history, vignette)
+
+    if not fits(messages):
+        notes.append("over_budget")
+        logger.warning("Prompt still exceeds %s context after trimming: %s", model_profile.family, notes)
+    return messages, evidence, notes
+
+
+# A base model often keeps writing the next turn of a transcript it imagines.
+_FABRICATED_TURN_RE = re.compile(
+    r"\n\s*(?:#{1,4}\s*)?(?:User|Patient|Human|Question|Instruction|Current Question|"
+    r"Previous Case History|Retrieved Guidelines)\s*:?\s*\n|\n\s*(?:User|Human|Patient|Question)\s*:",
+    re.IGNORECASE,
+)
+_PROMPT_ECHO_RE = re.compile(r"^\s*(?:Provide your response:|Answer:)\s*", re.IGNORECASE)
+
+
+def clean_model_output(text: str, model_profile=None) -> str:
+    """Remove model-specific artifacts so every model's answer looks the same.
+
+    * all families' leftover control tokens and echoed delimiter tags
+    * an echoed "Provide your response:" cue at the start
+    * for base (non-instruction-tuned) models, anything after a fabricated
+      next turn such as "\nUser:" or "### Current Question"
+    """
+    from src.security.sanitize import strip_control_tokens
+
+    text = strip_control_tokens(text)
+    text = _PROMPT_ECHO_RE.sub("", text)
+    if model_profile is not None and not model_profile.instruction_tuned:
+        m = _FABRICATED_TURN_RE.search(text)
+        if m:
+            text = text[: m.start()]
+    return text.strip()

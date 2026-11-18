@@ -23,6 +23,7 @@ from typing import Callable, Iterable, Iterator, Optional, Protocol, Union, runt
 
 import requests
 
+from src.llm.model_profiles import ModelProfile, profile_from_config, resolve_profile
 from src.security.sanitize import neutralise_control_tokens
 
 Message = dict  # {"role": str, "content": str}
@@ -119,7 +120,14 @@ def _post_stream(url: str, api_key: str, payload: dict, backend: str) -> request
 class OpenAIChatAdapter:
     """OpenAI-compatible ``/v1/chat/completions`` backend."""
 
-    def __init__(self, base_url: str, model: str, api_key: str = "", system_role: bool = True):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str = "",
+        system_role: bool = True,
+        profile: Optional["ModelProfile"] = None,
+    ):
         if not base_url:
             raise LLMUnavailable("LLM_BASE_URL (or COLAB_API_BASE) is not set in .env.")
         self.base_url = _normalise_base_url(base_url)
@@ -127,6 +135,7 @@ class OpenAIChatAdapter:
         self.api_key = api_key
         self.system_role = system_role
         self.name = f"openai_chat:{model}"
+        self.profile = profile or resolve_profile(model)
 
     def stream(self, messages, *, temperature=0.2, max_tokens=640):
         msgs = messages if self.system_role else merge_system_into_user(messages)
@@ -216,7 +225,14 @@ def render_template(template: str, messages: list[Message]) -> str:
 class CompletionsAdapter:
     """OpenAI-compatible ``/v1/completions`` backend with a local chat template."""
 
-    def __init__(self, base_url: str, model: str, api_key: str = "", template: str = "gemma"):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str = "",
+        template: str = "gemma",
+        profile: Optional["ModelProfile"] = None,
+    ):
         if not base_url:
             raise LLMUnavailable("LLM_BASE_URL (or COLAB_API_BASE) is not set in .env.")
         self.base_url = _normalise_base_url(base_url)
@@ -226,6 +242,7 @@ class CompletionsAdapter:
         if self.template not in TEMPLATES:
             raise ValueError(f"Unknown LLM template {template!r}; choose from {sorted(TEMPLATES)}")
         self.name = f"completions:{self.template}:{model}"
+        self.profile = profile or resolve_profile(model, fallback_template=self.template)
 
     def stream(self, messages, *, temperature=0.2, max_tokens=640):
         prompt = render_template(self.template, messages)
@@ -261,9 +278,15 @@ class CallableAdapter:
     ``fn`` may return a string or an iterable of string deltas.
     """
 
-    def __init__(self, fn: Callable[..., Union[str, Iterable[str]]], name: str = "callable"):
+    def __init__(
+        self,
+        fn: Callable[..., Union[str, Iterable[str]]],
+        name: str = "callable",
+        profile: Optional["ModelProfile"] = None,
+    ):
         self.fn = fn
         self.name = name
+        self.profile = profile or resolve_profile(name)
 
     def stream(self, messages, *, temperature=0.2, max_tokens=640):
         result = self.fn(messages, temperature=temperature, max_tokens=max_tokens)
@@ -277,22 +300,36 @@ class CallableAdapter:
 # Factory
 # ---------------------------------------------------------------------------
 
+def for_medical_model(
+    model: str,
+    base_url: str,
+    provider: str = "completions",
+    api_key: str = "",
+    profile: Optional[ModelProfile] = None,
+) -> LLMAdapter:
+    """Build an adapter for a medical model, configured from its profile.
+
+    The profile (see ``model_profiles.py``) supplies the prompt template,
+    system-role support and context window, so callers only name the model::
+
+        for_medical_model("aaditya/Llama3-OpenBioLLM-8B", "http://localhost:8000")
+        for_medical_model("BioMistral/BioMistral-7B", "http://localhost:8001", provider="openai_chat")
+    """
+    profile = profile or resolve_profile(model)
+    if provider in ("openai_chat", "chat", "openai"):
+        return OpenAIChatAdapter(base_url, model, api_key, system_role=profile.system_role, profile=profile)
+    if provider == "completions":
+        return CompletionsAdapter(base_url, model, api_key, template=profile.template, profile=profile)
+    raise ValueError(f"Unknown provider {provider!r}; use 'completions' or 'openai_chat'.")
+
+
 def adapter_from_config() -> LLMAdapter:
     """Build the adapter described by ``LLM_*`` settings in ``.env``."""
-    from src.config import (
-        LLM_API_KEY,
-        LLM_BASE_URL,
-        LLM_MODEL,
-        LLM_PROVIDER,
-        LLM_SYSTEM_ROLE,
-        LLM_TEMPLATE,
-    )
+    from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_PROVIDER
 
-    if LLM_PROVIDER in ("openai_chat", "chat", "openai"):
-        return OpenAIChatAdapter(LLM_BASE_URL, LLM_MODEL, LLM_API_KEY, system_role=LLM_SYSTEM_ROLE)
-    if LLM_PROVIDER == "completions":
-        return CompletionsAdapter(LLM_BASE_URL, LLM_MODEL, LLM_API_KEY, template=LLM_TEMPLATE)
-    raise ValueError(f"Unknown LLM_PROVIDER {LLM_PROVIDER!r}; use 'completions' or 'openai_chat'.")
+    return for_medical_model(
+        LLM_MODEL, LLM_BASE_URL, provider=LLM_PROVIDER, api_key=LLM_API_KEY, profile=profile_from_config()
+    )
 
 
 _cached: Optional[LLMAdapter] = None
