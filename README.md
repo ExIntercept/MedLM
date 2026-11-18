@@ -220,6 +220,33 @@ python scripts/run_cross_model_eval.py --config scripts/cross_model_config.examp
 ```
 This runs the adversarial and benign battery against each listed medical model twice: once **undefended** (raw model) and once **defended** (through the gateway). It writes `docs/CROSS_MODEL_EVAL_REPORT.md` with a per-model comparison. `--stub` runs the same pipeline with a fake model and needs no GPU.
 
+### Public benchmark suite
+The defense is measured on public datasets the project did not write:
+
+| Suite | Type | Source |
+|---|---|---|
+| `medsafetybench` | Harmful medical requests (900) | MedSafetyBench, NeurIPS 2024 D&B (test split) |
+| `medical_jailbreak` | Real jailbreak template + MedSafetyBench request | In-the-wild jailbreaks (Shen et al., CCS 2024) × MedSafetyBench |
+| `in_the_wild` | Jailbreak templates (1,405) | Shen et al., CCS 2024 |
+| `jbb_harmful` / `jbb_benign` | Harmful and matched benign behaviors | JailbreakBench |
+| `deepset_injection` / `deepset_benign` | Prompt injections and controls | deepset/prompt-injections (test split) |
+| `xstest_unsafe` / `xstest_safe` | Over-refusal probes | XSTest |
+| `medqa` | USMLE questions (clinician) | MedQA-USMLE 4-option (test split) |
+| `medquad` | Consumer health questions (patient) | MedQuAD |
+
+```bash
+python scripts/fetch_benchmarks.py                       # data files only -> data/benchmarks/raw (gitignored)
+python scripts/run_benchmark_suite.py screen --limit 200 # pre-model stages only, no GPU
+python scripts/run_benchmark_suite.py screen --limit 200 --ablate   # each detector layer alone
+python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_config.example.json \
+    --limit 25 --judge-config judge.json                 # undefended vs defended per medical model
+```
+
+- **`screen`** reports, per suite, the share of attacks stopped or flagged before reaching any model, and the share of benign questions wrongly stopped. Every rate includes a 95% Wilson interval.
+- **`e2e`** reports, per medical model, the attack success rate, the benign refusal rate and MedQA accuracy, undefended vs defended.
+- **Judge.** For `e2e`, serve Llama Guard 3 behind an OpenAI-compatible endpoint and pass it with `--judge-config`. Without a judge, a refusal-phrase heuristic is used, which measures non-refusal only, not harm.
+- **Training-data overlap.** Suites marked `*` in the reports overlap the published training data of the Prompt Guard classifier (XSTest, and jailbreakchat-derived prompts). Report them as in-distribution, not held-out.
+
 ---
 
 ## 📁 Repository Structure

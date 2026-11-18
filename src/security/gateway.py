@@ -88,6 +88,12 @@ class GatewayResult:
     trace: list = field(default_factory=list)
     """Ordered list of stages that ran, for audit and the UI."""
 
+    flagged: bool = False
+    """True when detection returned FLAG (request continues with mitigation)."""
+
+    sanitized: Any = None
+    """The SanitizedInputs produced by stage 1."""
+
     meta: dict = field(default_factory=dict)
     """Stage-specific metadata to persist with the assistant message."""
 
@@ -102,6 +108,7 @@ class ClinicalDefenseGateway:
         toggles: Optional[dict] = None,
         temperature: float = 0.2,
         max_tokens: int = 640,
+        log_decisions: bool = True,
     ):
         """
         Args:
@@ -117,12 +124,13 @@ class ClinicalDefenseGateway:
         self.toggles = toggles if toggles is not None else dict(DEFAULT_TOGGLES)
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.log_decisions = log_decisions
 
     def _on(self, key: str) -> bool:
         return self.toggles.get(key, DEFAULT_TOGGLES.get(key, True))
 
     # ------------------------------------------------------------------
-    def run(
+    def screen(
         self,
         message: str,
         profile: Any = None,
@@ -131,17 +139,13 @@ class ClinicalDefenseGateway:
         conversation_id: Optional[int] = None,
         on_event: Optional[EventSink] = None,
     ) -> GatewayResult:
-        """Process one user turn end to end.
+        """Run only the pre-model stages (sanitize, triage, guardrails, detect).
 
-        Args:
-            message:         Raw user message.
-            profile:         Patient profile (pydantic model, dict, or None).
-            history:         Server-side conversation history, oldest first,
-                             as ``[{"role": ..., "content": ...}]``. Never pass
-                             client-supplied history: it enables turn forgery.
-            mode:            "patient" or "clinician" (controls tone).
-            conversation_id: Used only for the defense log.
-            on_event:        ``fn(event_name, data)`` progress callback.
+        Returns a terminal result (EMERGENCY_ESCALATION, INTERCEPTED, BLOCKED)
+        with the safe response to show, or status ``PASS`` when the request may
+        proceed to the model (``flagged`` says whether mitigation applies).
+        The model is never called, so this is cheap enough to run over whole
+        benchmark datasets.
         """
         emit: EventSink = on_event or (lambda _e, _d: None)
         history = history or []
@@ -173,6 +177,7 @@ class ClinicalDefenseGateway:
                     response_text=EMERGENCY_WARNING,
                     user_text=user_text,
                     trace=trace,
+                    sanitized=san,
                     meta={"emergency_triage": category},
                 )
 
@@ -192,6 +197,7 @@ class ClinicalDefenseGateway:
                     response_text=text,
                     user_text=user_text,
                     trace=trace,
+                    sanitized=san,
                     meta={"guardrail_intercept": True},
                 )
 
@@ -210,7 +216,8 @@ class ClinicalDefenseGateway:
                 disable_layer_a=not self._on("layer_prompt_guard"),
                 disable_layer_b=not self._on("layer_template_matcher"),
             )
-            log_decision(decision, conversation_id, None, san.message.detector_text)
+            if self.log_decisions:
+                log_decision(decision, conversation_id, None, san.message.detector_text)
 
             if decision.action == "BLOCK":
                 emit("sources", [])
@@ -222,6 +229,7 @@ class ClinicalDefenseGateway:
                     user_text=user_text,
                     decision=decision,
                     trace=trace,
+                    sanitized=san,
                     meta={
                         "security_block": decision.category,
                         "pg": decision.pg_score,
@@ -232,6 +240,49 @@ class ClinicalDefenseGateway:
             if decision.action == "FLAG":
                 emit("security_status", {"action": "FLAG"})
                 flagged = True
+
+        return GatewayResult(
+            status="PASS",
+            response_text="",
+            user_text=user_text,
+            decision=decision,
+            trace=trace,
+            flagged=flagged,
+            sanitized=san,
+        )
+
+    def run(
+        self,
+        message: str,
+        profile: Any = None,
+        history: Optional[list[dict]] = None,
+        mode: str = "patient",
+        conversation_id: Optional[int] = None,
+        on_event: Optional[EventSink] = None,
+    ) -> GatewayResult:
+        """Process one user turn end to end.
+
+        Args:
+            message:         Raw user message.
+            profile:         Patient profile (pydantic model, dict, or None).
+            history:         Server-side conversation history, oldest first,
+                             as ``[{"role": ..., "content": ...}]``. Never pass
+                             client-supplied history: it enables turn forgery.
+            mode:            "patient" or "clinician" (controls tone).
+            conversation_id: Used only for the defense log.
+            on_event:        ``fn(event_name, data)`` progress callback.
+        """
+        emit: EventSink = on_event or (lambda _e, _d: None)
+        history = history or []
+
+        screened = self.screen(message, profile, history, mode, conversation_id, on_event)
+        if screened.status != "PASS":
+            return screened
+        san = screened.sanitized
+        user_text = screened.user_text
+        decision = screened.decision
+        flagged = screened.flagged
+        trace = list(screened.trace)
 
         from src.agents.intake_extraction import extract_intake_fields
 
