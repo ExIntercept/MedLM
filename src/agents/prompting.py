@@ -145,17 +145,7 @@ def build_prompt(
         nonce = secrets.token_hex(4)
 
     history_block = format_history(conversation_history)
-
-    if detected_options:
-        tone = "usmle"
-    elif forced_tone in ("patient", "clinical_qa"):
-        tone = forced_tone
-    else:
-        prior_user_text = "\n".join(
-            turn.get("content", "") for turn in (conversation_history or []) if turn.get("role") == "user"
-        )
-        tone_text = f"{prior_user_text}\n{vignette_text}" if prior_user_text else vignette_text
-        tone = detect_prompt_tone(tone_text)
+    tone = _resolve_tone(vignette_text, detected_options, conversation_history, forced_tone)
 
     # ── Hardened=False: reproduce legacy prompt for ablation/benchmark ────────
     if not hardened:
@@ -187,7 +177,56 @@ def build_prompt(
     return raw_prompt
 
 
+def build_messages(
+    vignette_text,
+    detected_options=None,
+    evidence_md="",
+    conversation_history=None,
+    forced_tone=None,
+    patient_profile_text: str = "",
+    flagged: bool = False,
+    nonce: Optional[str] = None,
+) -> list[dict]:
+    """Build the hardened clinical prompt as model-agnostic chat messages.
+
+    Returns ``[{"role": "system", ...}, {"role": "user", ...}]``. No model-specific
+    turn markers are added; the LLM adapter (or the serving stack's own chat
+    template) is responsible for rendering them. Conversation history is kept
+    inside the nonce-tagged ``conversation_log`` block as *data* rather than
+    replayed as real turns, so forged "assistant" turns cannot be injected.
+    """
+    if nonce is None:
+        nonce = secrets.token_hex(4)
+
+    from src.security.sanitize import sanitize_text
+    clean_vignette = sanitize_text(vignette_text, max_chars=len(vignette_text) + 1).model_text
+
+    history_block = format_history(conversation_history)
+    tone = _resolve_tone(vignette_text, detected_options, conversation_history, forced_tone)
+
+    instructions, body = _build_hardened_parts(
+        clean_vignette, detected_options, evidence_md, history_block,
+        patient_profile_text, tone, nonce, flagged,
+    )
+    return [
+        {"role": "system", "content": instructions},
+        {"role": "user", "content": body},
+    ]
+
+
 # ── Internal builders ─────────────────────────────────────────────────────────
+
+def _resolve_tone(vignette_text, detected_options, conversation_history, forced_tone) -> str:
+    if detected_options:
+        return "usmle"
+    if forced_tone in ("patient", "clinical_qa"):
+        return forced_tone
+    prior_user_text = "\n".join(
+        turn.get("content", "") for turn in (conversation_history or []) if turn.get("role") == "user"
+    )
+    tone_text = f"{prior_user_text}\n{vignette_text}" if prior_user_text else vignette_text
+    return detect_prompt_tone(tone_text)
+
 
 def _build_hardened_prompt(
     vignette_text: str,
@@ -200,6 +239,29 @@ def _build_hardened_prompt(
     flagged: bool,
 ) -> str:
     """Build the nonce-tagged hardened prompt body (no model turn markers)."""
+    persona, body = _build_hardened_parts(
+        vignette_text, detected_options, evidence_md, history_block,
+        patient_profile_text, tone, nonce, flagged,
+    )
+    return f"{persona}\n\n{body}"
+
+
+def _build_hardened_parts(
+    vignette_text: str,
+    detected_options,
+    evidence_md: str,
+    history_block: str,
+    patient_profile_text: str,
+    tone: str,
+    nonce: str,
+    flagged: bool,
+) -> tuple[str, str]:
+    """Return ``(instructions, tagged_data_and_rules)`` for the hardened prompt.
+
+    The first element is trusted, system-level instruction text. The second
+    holds the nonce-tagged untrusted data followed by the post-content rules,
+    so chat-style models can receive them as separate system / user messages.
+    """
 
     evidence_content = evidence_md if evidence_md else "Standard clinical guidelines apply."
     profile_content = patient_profile_text if patient_profile_text else "Not provided."
@@ -223,8 +285,7 @@ def _build_hardened_prompt(
             f"Clinical Vignette:\n{vignette_text}\n\n"
             f"Options:\n{opts_str}"
         )
-        raw = (
-            f"{persona}\n\n"
+        body = (
             f"<reference_material_{nonce}>\n### Retrieved Guidelines\n{evidence_content}\n</reference_material_{nonce}>\n\n"
             f"<conversation_log_{nonce}>\n### Previous Case History\n{history_block}\n</conversation_log_{nonce}>\n\n"
             f"<patient_profile_{nonce}>\n{profile_content}\n</patient_profile_{nonce}>\n\n"
@@ -232,7 +293,7 @@ def _build_hardened_prompt(
             f"{post_rules}\n\n"
             f"{closing}"
         )
-        return raw
+        return persona, body
 
     elif tone == "patient":
         known_fields = extract_intake_fields(f"{history_block}\n{vignette_text}")
@@ -279,8 +340,7 @@ def _build_hardened_prompt(
             f"{format_instruction}"
         )
 
-        raw = (
-            f"{persona}\n\n"
+        body = (
             f"<reference_material_{nonce}>\n### Retrieved Guidelines\n{evidence_content}\n</reference_material_{nonce}>\n\n"
             f"<conversation_log_{nonce}>\n### Previous Case History\n{history_block}\n</conversation_log_{nonce}>\n\n"
             f"<patient_profile_{nonce}>\n{profile_content}\n</patient_profile_{nonce}>\n\n"
@@ -288,7 +348,7 @@ def _build_hardened_prompt(
             f"{post_rules}\n\n"
             f"Provide your response:"
         )
-        return raw
+        return persona, body
 
     else:  # clinical_qa
         persona = (
@@ -302,8 +362,7 @@ def _build_hardened_prompt(
             "- Every factual assertion should be directly traceable to the Retrieved Guidelines."
         )
 
-        raw = (
-            f"{persona}\n\n"
+        body = (
             f"<reference_material_{nonce}>\n### Retrieved Guidelines\n{evidence_content}\n</reference_material_{nonce}>\n\n"
             f"<conversation_log_{nonce}>\n### Previous Case History\n{history_block}\n</conversation_log_{nonce}>\n\n"
             f"<patient_profile_{nonce}>\n{profile_content}\n</patient_profile_{nonce}>\n\n"
@@ -311,7 +370,7 @@ def _build_hardened_prompt(
             f"{post_rules}\n\n"
             f"Provide your response:"
         )
-        return raw
+        return persona, body
 
 
 def _build_legacy_prompt(

@@ -74,7 +74,20 @@ _GEMMA_TOKEN_RE = re.compile(
 )
 
 # <|im_start|>, <|im_end|>, and generic <|...|> delimiters
+# (also covers Llama 3 <|begin_of_text|>, <|start_header_id|>, <|eot_id|>, Phi, Qwen)
 _CHATML_TOKEN_RE = re.compile(r"<\|[^|>]{1,40}\|>", re.IGNORECASE)
+
+# Llama 2 / Mistral instruction markers: [INST] [/INST] [SYSTEM_PROMPT] [TOOL_CALLS] ...
+_BRACKET_TOKEN_RE = re.compile(
+    r"\[\s*/?\s*(INST|SYSTEM_PROMPT|AVAILABLE_TOOLS|TOOL_CALLS|TOOL_RESULTS)\s*\]",
+    re.IGNORECASE,
+)
+
+# Llama 2 system delimiters: <<SYS>> <</SYS>>
+_SYS_TOKEN_RE = re.compile(r"<<\s*/?\s*SYS\s*>>", re.IGNORECASE)
+
+# SentencePiece sequence markers used by Llama 2 / Mistral templates: <s> </s>
+_SEQ_TOKEN_RE = re.compile(r"<\s*/?\s*s\s*>", re.IGNORECASE)
 
 # Step 3: Forged application delimiter tags
 _APP_TAG_RE = re.compile(
@@ -92,6 +105,51 @@ def _neutralise_angle(match: re.Match) -> str:  # type: ignore[type-arg]
     """Replace < with \u2039 (U+2039) and > with \u203a (U+203A) in a matched token."""
     s = match.group(0)
     return "\u2039" + s[1:-1] + "\u203a"
+
+
+def neutralise_control_tokens(text: str) -> tuple[str, list[str]]:
+    """Defang chat-template control tokens for every supported model family.
+
+    Covers Gemma (``<start_of_turn>``), ChatML / Llama 3 / Qwen / Phi
+    (``<|...|>``), Llama 2 / Mistral (``[INST]``, ``<<SYS>>``, ``<s>``). Tokens
+    are made inert by swapping their delimiters for look-alike glyphs, so the
+    text stays readable but can no longer be parsed as a turn boundary by any
+    tokenizer. Returns the new text and a list of ``control_token:<name>`` notes.
+
+    This is model-agnostic on purpose: the gateway may route the same request
+    to any backend, so every family's markers are neutralised regardless of
+    which model is configured.
+    """
+    notes: list[str] = []
+
+    def _replace_gemma(m: re.Match) -> str:  # type: ignore[type-arg]
+        notes.append(f"control_token:{m.group(1).lower()}")
+        return _neutralise_angle(m)
+
+    def _replace_chatml(m: re.Match) -> str:  # type: ignore[type-arg]
+        notes.append(f"control_token:{m.group(0)[2:-2].strip()}")
+        return _neutralise_angle(m)
+
+    def _replace_bracket(m: re.Match) -> str:  # type: ignore[type-arg]
+        notes.append(f"control_token:{m.group(1).lower()}")
+        s = m.group(0)
+        return "\u2045" + s[1:-1] + "\u2046"
+
+    def _replace_sys(m: re.Match) -> str:  # type: ignore[type-arg]
+        notes.append("control_token:sys")
+        s = m.group(0)
+        return "\u2039\u2039" + s[2:-2] + "\u203a\u203a"
+
+    def _replace_seq(m: re.Match) -> str:  # type: ignore[type-arg]
+        notes.append("control_token:s")
+        return _neutralise_angle(m)
+
+    text = _GEMMA_TOKEN_RE.sub(_replace_gemma, text)
+    text = _CHATML_TOKEN_RE.sub(_replace_chatml, text)
+    text = _BRACKET_TOKEN_RE.sub(_replace_bracket, text)
+    text = _SYS_TOKEN_RE.sub(_replace_sys, text)
+    text = _SEQ_TOKEN_RE.sub(_replace_seq, text)
+    return text, notes
 
 
 def sanitize_text(text: str, max_chars: int) -> SanitizedField:
@@ -137,22 +195,11 @@ def sanitize_text(text: str, max_chars: int) -> SanitizedField:
         notes.append(f"cf_other:{len(cf_chars)}")
 
     # ------------------------------------------------------------------
-    # Step 2 — Neutralise Gemma / ChatML control tokens
+    # Step 2 — Neutralise chat-template control tokens (all model families)
     # ------------------------------------------------------------------
 
-    def _replace_gemma(m: re.Match) -> str:  # type: ignore[type-arg]
-        token_name = m.group(1).lower() if m.group(1) else "unknown"
-        notes.append(f"control_token:{token_name}")
-        return _neutralise_angle(m)
-
-    text, _ = _GEMMA_TOKEN_RE.subn(_replace_gemma, text)
-
-    def _replace_chatml(m: re.Match) -> str:  # type: ignore[type-arg]
-        inner = m.group(0)[2:-2]  # strip <| and |>
-        notes.append(f"control_token:{inner.strip()}")
-        return _neutralise_angle(m)
-
-    text, _ = _CHATML_TOKEN_RE.subn(_replace_chatml, text)
+    text, token_notes = neutralise_control_tokens(text)
+    notes.extend(token_notes)
 
     # ------------------------------------------------------------------
     # Step 3 — Neutralise forged application delimiter tags

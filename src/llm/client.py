@@ -4,11 +4,12 @@ from typing import AsyncIterator, Dict, Iterator, List, Optional
 import httpx
 import requests
 
+# LLM_* settings fall back to the COLAB_* ones, so existing .env files keep working.
 from src.config import (
-    COLAB_API_BASE,
-    COLAB_API_KEY,
+    LLM_API_KEY as COLAB_API_KEY,
+    LLM_BASE_URL as COLAB_API_BASE,
+    LLM_MODEL as MODEL_ID,
     MAX_MODEL_LEN,
-    MODEL_ID,
     PROMPT_STYLE,
     RESERVE_OUTPUT_TOKENS,
 )

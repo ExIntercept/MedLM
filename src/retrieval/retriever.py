@@ -44,10 +44,10 @@ def get_device() -> str:
 
 
 DEVICE = get_device()
-print(f"🔧 Using compute device for RAG: {DEVICE}")
+print(f"[RAG] Using compute device: {DEVICE}")
 
 # 1. Load BM25 Index & Corpus Chunks
-print("📦 [1/3] Loading BM25 Index & Corpus Chunks...")
+print("[RAG 1/3] Loading BM25 index and corpus chunks...")
 bm25_path = CORPUS_DIR / "bm25_index.pkl"
 chunks_path = CORPUS_DIR / "full_corpus_chunks.csv"
 
@@ -63,7 +63,7 @@ KNOWN_MEDICATIONS = set(
 )
 
 # 2. ChromaDB Client & Lazy Embedder
-print("📦 [2/3] Connecting to ChromaDB...")
+print("[RAG 2/3] Connecting to ChromaDB...")
 chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
 try:
     collection = chroma_client.get_or_create_collection(name="medical_corpus")
@@ -73,7 +73,7 @@ except Exception as e:
     collection = None
     coll_count = 0
 
-print(f"   Loading S-PubMedBERT Embedder on {DEVICE}...")
+print(f"[RAG] Loading S-PubMedBERT embedder on {DEVICE}...")
 try:
     embedder = SentenceTransformer("pritamdeka/S-PubMedBert-MS-MARCO", device=DEVICE)
 except Exception as exc:
@@ -86,9 +86,9 @@ def get_embedder() -> SentenceTransformer:
 
 
 # 3. Load MedCPT Neural Cross-Encoder Reranker
-print(f"📦 [3/3] Loading MedCPT Neural Cross-Encoder Reranker on {DEVICE}...")
+print(f"[RAG 3/3] Loading MedCPT neural cross-encoder reranker on {DEVICE}...")
 reranker = CrossEncoder("ncbi/MedCPT-Cross-Encoder", device=DEVICE, trust_remote_code=True)
-print("✅ Hybrid RAG Pipeline Ready.")
+print("[RAG] Hybrid RAG pipeline ready.")
 
 
 def biomedical_tokenize(text: str) -> List[str]:

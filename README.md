@@ -164,16 +164,32 @@ Retrieves verified clinical evidence across a curated corpus of 30,980+ chunks f
 - **Post-Rules Injection**: Reinforces system instructions directly after the user input block to prevent recency-bias jailbreaks.
 - **Server-Side History**: Uses history loaded strictly from the local SQLite database; completely ignores client-supplied turn history to prevent **turn-forgery attacks**.
 
-### Stage 7: Remote Inference Streaming (MedGemma)
-*File: `src/llm/client.py`*
-- Streams tokens from the remote Colab GPU instance running `google/medgemma-4b-it` via an ngrok tunnel.
-- Includes `ngrok-skip-browser-warning: 1` headers to bypass ngrok intermediary landing pages.
-- Uses Server-Sent Events (SSE) `/api/chat/stream` to stream tokens in real-time directly into the chat bubble.
+### Stage 7: Model-Agnostic Inference (any LLM)
+*Files: `src/llm/adapters.py`, `src/security/gateway.py`*
+- The protected model is reached only through an `LLMAdapter`. The defense stages never depend on which model is behind it.
+- `openai_chat` sends role-based messages to any OpenAI-compatible `/v1/chat/completions` server (vLLM, TGI, Ollama, LM Studio, llama.cpp, OpenAI), and the server applies the model's own chat template.
+- `completions` renders the template locally (`gemma`, `chatml`, `llama3`, `mistral`, `plain`) for base models or servers without a chat endpoint. Control tokens from every model family are neutralised in all message content before rendering.
+- `CallableAdapter` wraps any Python function (a local Hugging Face pipeline, a vendor SDK, or a test stub).
 
 ### Stage 8: Post-Generation Evidence Grounding Audit
 *File: `src/agents/verifier.py`*
 - Evaluates the generated clinical response against the retrieved evidence passages.
 - Computes claim overlap and emits a **Faithfulness / Grounding Score** (0–100%) displayed directly in the chat UI with a badge indicating `PASS` or `FLAGGED`.
+- The answer is held until this check finishes. A `FLAGGED` answer is never shown. The user receives a clinical "could not verify" message instead.
+
+### Using the gateway directly
+`ClinicalDefenseGateway` runs stages 0–8 around any adapter and does not depend on FastAPI, so evaluation scripts can compare models under identical defenses:
+
+```python
+from src.llm.adapters import OpenAIChatAdapter, CallableAdapter
+from src.retrieval.retriever import retrieve_context
+from src.security.gateway import ClinicalDefenseGateway
+
+llm = OpenAIChatAdapter("http://localhost:11434", "llama3.1")          # or any adapter
+gateway = ClinicalDefenseGateway(llm, retriever=lambda q: retrieve_context(q, top_k=3))
+result = gateway.run("How is asthma managed?", mode="clinician")
+print(result.status, result.trace, result.response_text)
+```
 
 ---
 
@@ -223,7 +239,8 @@ MedGemmaLocal/
 │   ├── index.html              # Main single-page clinical console
 │   ├── app.js                  # Frontend state, SSE handling, & security console
 │   └── styles.css              # Dark-mode medical UI styles
-├── run.sh                      # One-click startup script
+├── run.sh                      # One-click startup script (macOS/Linux)
+├── run.ps1                     # One-click startup script (Windows PowerShell)
 ├── requirements.txt            # Python dependencies
 └── .env.example                # Example environment configuration
 ```
@@ -312,8 +329,24 @@ Open your browser and navigate to:
 ```
 http://127.0.0.1:8600
 ```
+- The React clinical console is served when `frontend/dist` exists. Build it first with
+  `npm install` and `npm run build` in `frontend/`. If it has not been built, the
+  server falls back to the legacy static console.
+- The console is designed for active clinical workflows rather than passive reporting:
+  authenticated consultation threads, patient intake, verified consultations,
+  medication safety checks, evidence search, and evaluation results are available
+  from the navigation tabs.
 - Sign up or log in with any username and password (sessions are handled via secure JWTs stored in local storage).
 - Check the health chips at the top navigation bar to confirm **Colab MedGemma** and **RAG Engine** display green **Ready** dots.
+
+On Windows PowerShell, use:
+```powershell
+.\run.ps1
+```
+
+Set `ADMIN_USERNAMES` in `.env` to a comma-separated list of usernames permitted to
+view defense logs and change defense configuration. These endpoints require both a
+valid JWT and membership in that allowlist.
 
 ---
 

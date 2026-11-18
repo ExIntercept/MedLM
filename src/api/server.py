@@ -14,20 +14,27 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlmodel import Session, select
 from sse_starlette.sse import EventSourceResponse
 
-from src.agents.emergency_triage import EMERGENCY_WARNING, check_emergency_triage
-from src.agents.guardrails import check_hard_rules, format_guardrail_intercept, parse_embedded_options
-from src.agents.intake_extraction import extract_intake_fields
-from src.agents.prompting import build_prompt, format_patient_profile, sanitize_patient_output
-from src.agents.verifier import verify_evidence
+from src.agents.guardrails import check_hard_rules
+from src.agents.prompting import format_patient_profile
 from src.auth.dependencies import get_current_user
 from src.auth.security import create_access_token, hash_password, verify_password
-from src.config import DOCS_DIR, MODEL_ID, PROMPT_STYLE, ROOT
+from src.config import (
+    ADMIN_USERNAMES,
+    DOCS_DIR,
+    LLM_MODEL,
+    LLM_PROVIDER,
+    LLM_TEMPERATURE,
+    LLM_TEMPLATE,
+    RESERVE_OUTPUT_TOKENS,
+    ROOT,
+)
 from src.db.models import ApiUser, Conversation, ConversationMessage
 from src.db.orm import ENGINE, get_db_session, init_db
-from src.llm.client import health_sync, stream_generate
+from src.llm.adapters import get_default_adapter
+from src.llm.client import health_sync
 from src.retrieval.retriever import collection, embedder, reranker, retrieve_context
-from src.security import run_input_defenses, sanitize_user_inputs, warmup
-from src.security.logging import log_decision
+from src.security import warmup
+from src.security.gateway import BLOCK_MESSAGE, DEFAULT_TOGGLES, ClinicalDefenseGateway  # noqa: F401
 
 app = FastAPI(title="Medical RAG & MedGemma Clinical API")
 
@@ -99,13 +106,6 @@ class ChatStreamRequest(BaseModel):
     mode: Literal["patient", "clinician"] = "patient"
 
 
-# Patient-facing refusal message for security blocks.
-# Deliberately vague: reveals nothing about which detector fired.
-BLOCK_MESSAGE = (
-    "I can only help with genuine health questions, and I can't respond to role-play or "
-    "instruction-override requests. If you have a medical question, please ask it directly "
-    "and I'll do my best to help. If this is an emergency, contact your local emergency number."
-)
 
 
 
@@ -181,6 +181,12 @@ def _get_owned_conversation(db: Session, conversation_id: int, user_id: int) -> 
     return conv
 
 
+def _require_admin(current_user: ApiUser = Depends(get_current_user)) -> ApiUser:
+    if current_user.username not in ADMIN_USERNAMES:
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    return current_user
+
+
 # --------------------------------------------------------------------------
 # Health Endpoint
 # --------------------------------------------------------------------------
@@ -203,8 +209,9 @@ def health():
         "chromadb": chromadb_ok,
         "chromadb_chunks": chromadb_count,
         "reranker": reranker_ok,
-        "model": MODEL_ID,
-        "prompt_style": PROMPT_STYLE,
+        "model": LLM_MODEL,
+        "llm_provider": LLM_PROVIDER,
+        "prompt_style": LLM_TEMPLATE if LLM_PROVIDER == "completions" else "server_chat_template",
         "status": "ok" if (colab_health.get("ok", False) and chromadb_ok and reranker_ok) else "degraded",
     }
 
@@ -229,7 +236,7 @@ def evaluation_summary():
         raise HTTPException(status_code=500, detail=f"benchmark_results.json is not valid JSON: {exc}")
     return {
         "generated_at": payload.get("generated_at"),
-        "model": payload.get("model", MODEL_ID),
+        "model": payload.get("model", LLM_MODEL),
         "dataset_version": payload.get("dataset_version"),
         "num_cases": payload.get("num_cases"),
         "metrics": payload.get("metrics"),
@@ -370,15 +377,28 @@ def search_evidence(q: str = "", mode: str = "clinician", current_user: ApiUser 
 # --------------------------------------------------------------------------
 # Pipeline Configuration & Dynamic Layer Ablation Controls
 # --------------------------------------------------------------------------
-PIPELINE_CONFIG: dict[str, bool] = {
-    "defense_enabled": True,
-    "layer_sanitize": True,
-    "layer_triage": True,
-    "layer_guardrails": True,
-    "layer_prompt_guard": True,
-    "layer_template_matcher": True,
-    "layer_prompt_hardening": True,
-}
+PIPELINE_CONFIG: dict[str, bool] = dict(DEFAULT_TOGGLES)
+
+_gateway: Optional[ClinicalDefenseGateway] = None
+_gateway_lock = threading.Lock()
+
+
+def get_gateway() -> ClinicalDefenseGateway:
+    """Build the defense gateway once, around whatever model .env configures."""
+    global _gateway
+    with _gateway_lock:
+        if _gateway is None:
+            _gateway = ClinicalDefenseGateway(
+                llm=get_default_adapter(),
+                retriever=lambda query: retrieve_context(query, top_k=3),
+                toggles=PIPELINE_CONFIG,  # shared dict: admin toggles apply live
+                temperature=LLM_TEMPERATURE,
+                max_tokens=RESERVE_OUTPUT_TOKENS,
+            )
+        return _gateway
+
+
+_DONE_SCORE = {"EMERGENCY_ESCALATION": 1.0, "INTERCEPTED": 1.0, "BLOCKED": None}
 
 
 # --------------------------------------------------------------------------
@@ -387,185 +407,33 @@ PIPELINE_CONFIG: dict[str, bool] = {
 def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Queue"):
     with Session(ENGINE) as db:
         try:
-            # ── Layer S: Sanitise all user-controlled inputs ──────────────────
-            if PIPELINE_CONFIG.get("layer_sanitize", True):
-                san = sanitize_user_inputs(req.message, req.patient_profile)
-                raw_input = san.message.model_text  # sanitised, used hereafter
-            else:
-                from src.security.sanitize import SanitizedField, SanitizedInputs
-                san = SanitizedInputs(
-                    message=SanitizedField(model_text=req.message, detector_text=req.message, modified=False, notes=[]),
-                    profile={},
-                )
-                raw_input = req.message
-
-            # ── Layer 0: Emergency Red-Flag Triage ──
-            if PIPELINE_CONFIG.get("layer_triage", True):
-                triage_category = check_emergency_triage(raw_input)
-                if triage_category:
-                    _save_message(db, conversation_id, "user", raw_input)
-                    _save_message(
-                        db,
-                        conversation_id,
-                        "assistant",
-                        EMERGENCY_WARNING,
-                        meta={"emergency_triage": triage_category},
-                    )
-                    sink.put({"event": "sources", "data": []})
-                    sink.put({"event": "triage_status", "data": {"level": "EMERGENCY", "category": triage_category}})
-                    sink.put({"event": "token", "data": EMERGENCY_WARNING})
-                    sink.put({"event": "done", "data": {"status": "EMERGENCY_ESCALATION", "score": 1.0}})
-                    return
-
-            # ── Layer 1: Adversarial Guardrail ─────
-            if PIPELINE_CONFIG.get("layer_guardrails", True):
-                hit = check_hard_rules(raw_input)
-                if hit:
-                    entity, _, warning = hit
-                    response_text = format_guardrail_intercept(entity, warning, mode=req.mode)
-                    _save_message(db, conversation_id, "user", raw_input)
-                    _save_message(db, conversation_id, "assistant", response_text, meta={"guardrail_intercept": True})
-                    sink.put({"event": "sources", "data": []})
-                    sink.put({"event": "token", "data": response_text})
-                    sink.put({"event": "done", "data": {"status": "INTERCEPTED", "score": 1.0}})
-                    return
-
-            # ── Layer D: Input Defense (Prompt Guard + Template Matcher) ──────
             # Always use server-side DB history; ignore req.history to prevent
             # turn-forgery attacks via client-supplied "assistant" turns.
             db_history = _conversation_history(db, conversation_id, last_n=6)
-            prior_user_turns = [t["content"] for t in db_history if t["role"] == "user"][-2:]
 
-            decision = None
-            flagged = False
-            if PIPELINE_CONFIG.get("defense_enabled", True):
-                disable_a = not PIPELINE_CONFIG.get("layer_prompt_guard", True)
-                disable_b = not PIPELINE_CONFIG.get("layer_template_matcher", True)
-                decision = run_input_defenses(
-                    san, prior_user_turns, disable_layer_a=disable_a, disable_layer_b=disable_b
-                )
-                log_decision(decision, conversation_id, None, san.message.detector_text)
-
-                if decision.action == "BLOCK":
-                    _save_message(db, conversation_id, "user", raw_input)
-                    _save_message(
-                        db,
-                        conversation_id,
-                        "assistant",
-                        BLOCK_MESSAGE,
-                        meta={
-                            "security_block": decision.category,
-                            "pg": decision.pg_score,
-                            "tm": decision.tm_max_sim,
-                            "n_components": decision.tm_n_components,
-                        },
-                    )
-                    sink.put({"event": "sources", "data": []})
-                    sink.put({"event": "security_status", "data": {"action": "BLOCK", "category": decision.category}})
-                    sink.put({"event": "token", "data": BLOCK_MESSAGE})
-                    sink.put({"event": "done", "data": {"status": "BLOCKED", "score": None}})
-                    return
-
-                # FLAG: continue, but pass flagged=True to build_prompt and emit status
-                if decision.action == "FLAG":
-                    sink.put({"event": "security_status", "data": {"action": "FLAG"}})
-                    flagged = True
-
-            # ── Layer 2: Extract real-time profile update ─────────────────────
-            extracted_profile = extract_intake_fields(raw_input)
-            if extracted_profile:
-                sink.put({"event": "profile_update", "data": extracted_profile})
-
-            # ── Layer 3: Hybrid RAG Retrieval (BM25 + ChromaDB + RRF + MedCPT) ─
-            vignette_text, detected_options = parse_embedded_options(raw_input)
-            evidence = retrieve_context(vignette_text, top_k=3)
-
-            sources = [
-                {
-                    "chunk_id": str(chunk_id),
-                    "title": meta.get("title", "Guideline"),
-                    "source": meta.get("source", ""),
-                    "score": round(float(meta.get("cross_score", 0.0)), 4),
-                    "excerpt": text[:280],
-                }
-                for chunk_id, text, meta in evidence
-            ]
-            sink.put({"event": "sources", "data": sources})
-
-            evidence_md = ""
-            for idx, (_, text, meta) in enumerate(evidence, 1):
-                evidence_md += f"### [Evidence {idx}] {meta.get('title', 'Guideline')} (`{meta.get('source', '')}`)\n"
-                evidence_md += f"*MedCPT Rerank Score:* `{meta.get('cross_score', 0):.4f}`\n\n> {text}\n\n---\n"
-
-            # ── Layer 4: Tone-aware, hardened MedGemma Prompt Construction ────
-            # Build profile_note from sanitised profile model_texts.
-            profile_note = format_patient_profile(
-                age=san.profile.get("age") and san.profile["age"].model_text or None,
-                sex=san.profile.get("sex") and san.profile["sex"].model_text or None,
-                duration=san.profile.get("duration") and san.profile["duration"].model_text or None,
-                conditions=san.profile.get("conditions") and san.profile["conditions"].model_text or None,
-                medications=san.profile.get("medications") and san.profile["medications"].model_text or None,
-            )
-            forced_tone = "patient" if req.mode == "patient" else "clinical_qa"
-            hardened = PIPELINE_CONFIG.get("layer_prompt_hardening", True)
-            prompt = build_prompt(
-                vignette_text,
-                detected_options,
-                evidence_md,
-                db_history,
-                forced_tone=forced_tone,
-                prompt_style=PROMPT_STYLE,
-                patient_profile_text=profile_note,
-                hardened=hardened,
-                flagged=flagged,
+            result = get_gateway().run(
+                req.message,
+                profile=req.patient_profile,
+                history=db_history,
+                mode=req.mode,
+                conversation_id=conversation_id,
+                on_event=lambda event, data: sink.put({"event": event, "data": data}),
             )
 
-            # ── Layer 5: Real-time token streaming from Colab MedGemma ────────
-            accumulated_response = ""
-            for delta in stream_generate(prompt):
-                accumulated_response += delta
-                sink.put({"event": "token", "data": delta})
+            _save_message(db, conversation_id, "user", result.user_text)
+            _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
 
-            # Sanitize output
-            accumulated_response = sanitize_patient_output(accumulated_response)
-
-            # ── Layer 6: Post-generation evidence audit ────────────────────────
-            audit = verify_evidence(accumulated_response, evidence, vignette_text)
-
-            _save_message(
-                db,
-                conversation_id,
-                "user",
-                raw_input,
-            )
-            _save_message(
-                db,
-                conversation_id,
-                "assistant",
-                accumulated_response,
-                meta={
-                    "faithfulness_score": audit["score"],
+            if result.status == "ANSWERED":
+                audit = result.audit
+                done = {
                     "status": audit["status"],
-                    "security": {
-                        "action": decision.action if decision else "BYPASSED",
-                        "pg": decision.pg_score if decision else None,
-                        "tm_max": decision.tm_max_sim if decision else 0.0,
-                        "n_components": decision.tm_n_components if decision else 0,
-                    },
-                },
-            )
-
-            sink.put(
-                {
-                    "event": "done",
-                    "data": {
-                        "status": audit["status"],
-                        "score": audit["score"],
-                        "verified_claims": audit["verified_claims"],
-                        "flagged_claims": audit["flagged_claims"],
-                    },
+                    "score": audit["score"],
+                    "verified_claims": audit["verified_claims"],
+                    "flagged_claims": audit["flagged_claims"],
                 }
-            )
+            else:
+                done = {"status": result.status, "score": _DONE_SCORE.get(result.status)}
+            sink.put({"event": "done", "data": done})
         except Exception as exc:
             sink.put({"event": "error", "data": str(exc)})
         finally:
@@ -627,7 +495,7 @@ class DefenseConfigUpdate(BaseModel):
 
 
 @app.get("/api/admin/defense-config")
-def get_defense_config():
+def get_defense_config(_: ApiUser = Depends(_require_admin)):
     from src.config import DEFENSE_ENABLED, DEFENSE_THRESHOLDS_PATH
     from src.security.decision import load_thresholds
     from src.security.prompt_guard import _pg_instance, _pg_unavailable
@@ -640,7 +508,7 @@ def get_defense_config():
 
 
 @app.post("/api/admin/defense-config")
-def update_defense_config(update: DefenseConfigUpdate):
+def update_defense_config(update: DefenseConfigUpdate, _: ApiUser = Depends(_require_admin)):
     if update.toggles:
         PIPELINE_CONFIG.update(update.toggles)
     if update.thresholds:
@@ -653,7 +521,7 @@ def update_defense_config(update: DefenseConfigUpdate):
 
 
 @app.get("/api/admin/defense-log")
-def get_defense_log(limit: int = 100):
+def get_defense_log(limit: int = 100, _: ApiUser = Depends(_require_admin)):
     from src.config import DEFENSE_LOG_PATH
     if not DEFENSE_LOG_PATH.exists():
         return {"logs": []}
@@ -681,13 +549,16 @@ if static_dir.exists():
 
 dist_dir = ROOT / "frontend" / "dist"
 if dist_dir.exists():
+    assets_dir = dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
     app.mount("/app", StaticFiles(directory=dist_dir, html=True), name="frontend_app")
 
 
 @app.get("/")
 def index():
-    if (ROOT / "static" / "index.html").exists():
-        return FileResponse(ROOT / "static" / "index.html")
     if dist_dir.exists():
         return FileResponse(dist_dir / "index.html")
+    if (ROOT / "static" / "index.html").exists():
+        return FileResponse(ROOT / "static" / "index.html")
     return {"message": "Medical RAG API is running."}

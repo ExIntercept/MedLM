@@ -34,10 +34,36 @@ PROMPT_STYLE = os.environ.get("PROMPT_STYLE", "gemma").lower()
 MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "8192"))
 RESERVE_OUTPUT_TOKENS = int(os.environ.get("RESERVE_OUTPUT_TOKENS", "640"))
 
+# ── Model-agnostic LLM backend (used by the defense gateway) ─────────────────
+# LLM_PROVIDER selects how the protected model is called:
+#   completions  -> OpenAI-compatible /v1/completions; the gateway renders the
+#                   chat template itself (LLM_TEMPLATE). Default; matches the
+#                   original Colab/vLLM setup.
+#   openai_chat  -> OpenAI-compatible /v1/chat/completions; the serving stack
+#                   applies the model's own chat template. Works with vLLM, TGI,
+#                   Ollama, LM Studio, llama.cpp server, OpenAI and similar APIs.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "completions").lower()
+LLM_BASE_URL = (os.environ.get("LLM_BASE_URL") or COLAB_API_BASE).rstrip("/")
+if LLM_BASE_URL.endswith("/v1"):
+    LLM_BASE_URL = LLM_BASE_URL[: -len("/v1")]
+LLM_API_KEY = os.environ.get("LLM_API_KEY") or COLAB_API_KEY
+LLM_MODEL = os.environ.get("LLM_MODEL") or MODEL_ID
+# Template for LLM_PROVIDER=completions: gemma | chatml | llama3 | mistral | plain.
+# Falls back to PROMPT_STYLE ("chat" -> chatml, "base" -> plain).
+LLM_TEMPLATE = (os.environ.get("LLM_TEMPLATE") or PROMPT_STYLE).lower()
+# Set to 0 for models whose chat template rejects a system role (e.g. Gemma 2).
+LLM_SYSTEM_ROLE = os.environ.get("LLM_SYSTEM_ROLE", "1") == "1"
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
+
 # Auth secrets
 JWT_SECRET = os.environ.get("JWT_SECRET", os.environ.get("APP_SECRET", "dev-only-insecure-secret-change-in-production"))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+ADMIN_USERNAMES = {
+    username.strip()
+    for username in os.environ.get("ADMIN_USERNAMES", "").split(",")
+    if username.strip()
+}
 
 # ── Defense / Security pipeline ──────────────────────────────────────────────
 # Set DEFENSE_ENABLED=0 in .env to disable all layers (useful for ablation).
