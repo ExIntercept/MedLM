@@ -80,30 +80,59 @@ ABLATIONS = {
 }
 
 
-def run_screen(items: list[BenchItem], ablate: bool) -> dict:
+CHECKPOINT_DIR = ROOT / "data" / "benchmarks" / "runs"
+
+
+def _load_checkpoint(path: Path) -> dict[str, dict]:
+    done: dict[str, dict] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+                done[row["id"]] = row
+            except (json.JSONDecodeError, KeyError):
+                continue  # a partially written last line after a crash
+    return done
+
+
+def run_screen(items: list[BenchItem], ablate: bool, seed: int = 13, limit=None) -> dict:
+    """Screen every item; rows are appended to a checkpoint so an interrupted run resumes."""
     never_called = CallableAdapter(lambda *a, **k: "", name="unused")
     configs = ABLATIONS if ablate else {"full": {}}
     report = {"stage": "screen", "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "configs": {}}
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
     for cfg_name, overrides in configs.items():
         toggles = {**DEFAULT_TOGGLES, **overrides}
         gateway = ClinicalDefenseGateway(never_called, retriever=None, toggles=toggles, log_decisions=False)
+        ckpt = CHECKPOINT_DIR / f"screen_{cfg_name}_seed{seed}_limit{limit}.jsonl"
+        done = _load_checkpoint(ckpt)
+        if done:
+            print(f"  [{cfg_name}] resuming: {len(done)} prompts already screened ({ckpt.name})", flush=True)
         rows = []
         t0 = time.time()
+        fh = open(ckpt, "a", encoding="utf-8")
         for n, item in enumerate(items, 1):
+            if item.id in done:
+                rows.append(done[item.id])
+                continue
             start = time.perf_counter()
             r = gateway.screen(item.prompt, mode=_mode(item))
             ms = (time.perf_counter() - start) * 1000
             d = r.decision
-            rows.append({
+            row = {
                 "id": item.id, "suite": item.suite, "kind": item.kind,
                 "status": r.status, "flagged": r.flagged,
                 "action": d.action if d else None, "category": d.category if d else None,
                 "pg": d.pg_score if d else None, "tm": round(d.tm_max_sim, 4) if d else None,
                 "reasons": d.reasons if d else [], "ms": round(ms, 1),
-            })
+            }
+            rows.append(row)
+            fh.write(json.dumps(row) + "\n")
+            fh.flush()
             if n % 100 == 0:
                 print(f"  [{cfg_name}] {n}/{len(items)}  ({time.time() - t0:.0f}s)", flush=True)
+        fh.close()
         report["configs"][cfg_name] = {"summary": summarise_screen(rows), "rows": rows}
     return report
 
@@ -292,7 +321,7 @@ def main():
     args.out.mkdir(exist_ok=True)
 
     if args.stage == "screen":
-        report = run_screen(items, args.ablate)
+        report = run_screen(items, args.ablate, seed=args.seed, limit=limit)
         md = screen_markdown(report, limit)
         stem = "benchmark_suite_screen"
     else:
