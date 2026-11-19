@@ -42,6 +42,27 @@ MANIFEST: list[tuple[str, str, str]] = [
     ("xstest/xstest_prompts.csv",
      GH.format(repo="paul-rottger/xstest", path="xstest_prompts.csv"),
      "XSTest exaggerated-safety prompts"),
+    # ── Training-only files for the harmful-intent classifier (never evaluated on) ──
+    ("train/medsafetybench_train_med_n900.json",
+     GH.format(repo="AI4LIFE-GROUP/med-safety-bench",
+               path="datasets/train-splits-used-for-ft/med_safety/ft_safety_med_n900.json"),
+     "MedSafetyBench training split (harmful medical requests)"),
+    ("train/medqa_train.jsonl",
+     HF.format(repo="GBaker/MedQA-USMLE-4-options", path="phrases_no_exclude_train.jsonl"),
+     "MedQA USMLE training split (benign)"),
+    ("train/in_the_wild_regular_2023_12_25.parquet",
+     HF.format(repo="TrustAIRLab/in-the-wild-jailbreak-prompts", path="regular_2023_12_25/train-00000-of-00001.parquet"),
+     "In-the-wild regular (non-jailbreak) user prompts"),
+    ("train/or-bench-80k.csv",
+     HF.format(repo="bench-llm/or-bench", path="or-bench-80k.csv"),
+     "OR-Bench seemingly-toxic but safe prompts (hard negatives; hard-1k excluded)"),
+    ("train/or-bench-toxic.csv",
+     HF.format(repo="bench-llm/or-bench", path="or-bench-toxic.csv"),
+     "OR-Bench genuinely toxic prompts (general harmful positives)"),
+    # Evaluation: OR-Bench hard-1k over-refusal probes (excluded from training).
+    ("orbench/or-bench-hard-1k.csv",
+     HF.format(repo="bench-llm/or-bench", path="or-bench-hard-1k.csv"),
+     "OR-Bench hard-1k over-refusal prompts"),
 ] + [
     (f"medsafetybench/{gen}/category_{c}.csv",
      GH.format(repo="AI4LIFE-GROUP/med-safety-bench",
@@ -50,7 +71,7 @@ MANIFEST: list[tuple[str, str, str]] = [
     for gen in ("gpt4", "llama2") for c in range(1, 10)
 ]
 
-ALLOWED_SUFFIXES = {".csv", ".jsonl", ".parquet"}
+ALLOWED_SUFFIXES = {".csv", ".json", ".jsonl", ".parquet"}
 
 
 def main() -> int:

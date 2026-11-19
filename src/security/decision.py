@@ -41,7 +41,7 @@ class DefenseDecision:
     action: Literal["ALLOW", "FLAG", "BLOCK"]
     """Gating decision: ALLOW, FLAG (manual review), or BLOCK (hard reject)."""
 
-    category: Optional[Literal["JAILBREAK", "INJECTION", "STRUCTURAL"]]
+    category: Optional[Literal["JAILBREAK", "INJECTION", "STRUCTURAL", "HARMFUL_REQUEST"]]
     """Attack category when action != ALLOW. None when ALLOW."""
 
     pg_score: Optional[float]
@@ -66,7 +66,10 @@ class DefenseDecision:
     """Human-readable list of triggered rules, e.g. ["pg_score_high", "tm_sim_high"]."""
 
     latency_ms: dict
-    """Per-layer latency in milliseconds: {"pg": …, "tm": …, "total": …}."""
+    """Per-layer latency in milliseconds: {"pg": …, "tm": …, "harm": …, "total": …}."""
+
+    harm_score: Optional[float] = None
+    """Layer H harmful-intent score (max over texts). None if the layer did not run."""
 
 
 # ---------------------------------------------------------------------------
@@ -102,14 +105,17 @@ def run_input_defenses(
     prior_user_turns: list[str],
     disable_layer_a: bool = False,
     disable_layer_b: bool = False,
+    disable_layer_h: bool = False,
 ) -> DefenseDecision:
-    """Run Layer A (Prompt Guard) and Layer B (Template Matcher) on sanitized inputs.
+    """Run Layer A (Prompt Guard), Layer B (Template Matcher) and Layer H
+    (harmful-intent classifier) on sanitized inputs.
 
     Args:
         sanitized:        Output of :func:`sanitize_user_inputs`.
         prior_user_turns: Previous user messages in the conversation (most recent last).
         disable_layer_a:  If True, skip Prompt Guard scoring.
         disable_layer_b:  If True, skip Template Matcher scoring.
+        disable_layer_h:  If True, skip harmful-intent scoring.
 
     Returns:
         A :class:`DefenseDecision` with action, category, scores, and latency.
@@ -151,6 +157,7 @@ def run_input_defenses(
             thresholds_path=DEFENSE_THRESHOLDS_PATH,
             disable_layer_a=disable_layer_a,
             disable_layer_b=disable_layer_b,
+            disable_layer_h=disable_layer_h,
         )
     except Exception as exc:
         logger.exception("Unexpected error in defense pipeline: %s", exc)
@@ -180,6 +187,7 @@ def _run_defenses_inner(
     thresholds_path: Path,
     disable_layer_a: bool = False,
     disable_layer_b: bool = False,
+    disable_layer_h: bool = False,
 ) -> DefenseDecision:
     """Internal implementation; called from inside the try/except in run_input_defenses."""
     from pathlib import Path as _Path
@@ -285,8 +293,33 @@ def _run_defenses_inner(
                 seen_ids[eid] = entry
         top_templates = sorted(seen_ids.values(), key=lambda x: x["sim"], reverse=True)[:5]
 
+    # ------------------------------------------------------------------
+    # Layer H — Harmful-intent classifier (what is asked, not how)
+    # ------------------------------------------------------------------
+    t_h_start = time.perf_counter()
+    harm_score: Optional[float] = None
+    harm_block = harm_flag = None
+    harm_ms = 0.0
+    already_blocked = (
+        (pg_score is not None and pg_score >= pg_block)
+        or tm_max_sim >= tm_block
+        or tm_n_components >= components_block
+    )
+    # Skip when Layers A/B already block: saves seconds on long jailbreak prompts.
+    if not disable_layer_h and not already_blocked:
+        from src.security.harm_classifier import get_harm_classifier
+
+        hc = get_harm_classifier(device)
+        if hc is not None:
+            harm_texts = list(dict.fromkeys(t for t in (text_message, text_profile, text_multiturn) if t.strip()))
+            harm_score = max(h.score for h in hc.score_many(harm_texts)) if harm_texts else 0.0
+            harm_block = float(thresholds.get("harm_block", hc.block_threshold))
+            harm_flag = float(thresholds.get("harm_flag", hc.flag_threshold))
+        harm_ms = (time.perf_counter() - t_h_start) * 1000.0
+
     total_ms = (time.perf_counter() - t_total_start) * 1000.0
-    latency_ms = {"pg": round(pg_ms, 1), "tm": round(tm_ms, 1), "total": round(total_ms, 1)}
+    latency_ms = {"pg": round(pg_ms, 1), "tm": round(tm_ms, 1), "harm": round(harm_ms, 1),
+                  "total": round(total_ms, 1)}
 
     # ------------------------------------------------------------------
     # Decision logic
@@ -304,6 +337,9 @@ def _run_defenses_inner(
     if tm_n_components >= components_block:
         do_block = True
         reasons.append("tm_components_block")
+    if harm_score is not None and harm_score >= harm_block:
+        do_block = True
+        reasons.append("harm_block")
 
     # FLAG conditions
     do_flag = False
@@ -316,6 +352,9 @@ def _run_defenses_inner(
     if tm_n_components >= components_flag:
         do_flag = True
         reasons.append("tm_components_flag")
+    if harm_score is not None and harm_score >= harm_flag:
+        do_flag = True
+        reasons.append("harm_flag")
     if any(n.startswith("control_token:") for n in sanitize_notes):
         do_flag = True
         reasons.append("control_token_detected")
@@ -331,7 +370,7 @@ def _run_defenses_inner(
     # ------------------------------------------------------------------
     # Category classification
     # ------------------------------------------------------------------
-    category: Optional[Literal["JAILBREAK", "INJECTION", "STRUCTURAL"]] = None
+    category: Optional[Literal["JAILBREAK", "INJECTION", "STRUCTURAL", "HARMFUL_REQUEST"]] = None
 
     if action != "ALLOW":
         # Did Layer A fire on the message specifically?
@@ -352,15 +391,23 @@ def _run_defenses_inner(
         # Did Layer B match roleplay-persona patterns?
         tm_roleplay_match = tm_n_components >= components_flag
 
+        attack_framing = (
+            (pg_score is not None and pg_score >= pg_flag)
+            or tm_max_sim >= tm_flag
+            or tm_n_components >= components_flag
+        )
+        harm_fired = harm_score is not None and harm_score >= harm_flag
         only_sanitizer = (
             not do_block
-            and not (pg_score is not None and pg_score >= pg_flag)
-            and not (tm_max_sim >= tm_flag)
-            and not (tm_n_components >= components_flag)
+            and not attack_framing
+            and not harm_fired
             and any(n.startswith("control_token:") for n in sanitize_notes)
         )
 
-        if only_sanitizer:
+        if harm_fired and not attack_framing:
+            # Plainly worded harmful request: no jailbreak or injection framing.
+            category = "HARMFUL_REQUEST"
+        elif only_sanitizer:
             category = "STRUCTURAL"
         elif tm_roleplay_match or pg_fired_message:
             category = "JAILBREAK"
@@ -381,4 +428,5 @@ def _run_defenses_inner(
         sanitize_notes=sanitize_notes,
         reasons=reasons,
         latency_ms=latency_ms,
+        harm_score=round(harm_score, 4) if harm_score is not None else None,
     )

@@ -37,6 +37,16 @@ BLOCK_MESSAGE = (
     "and I'll do my best to help. If this is an emergency, contact your local emergency number."
 )
 
+# Refusal for plainly harmful medical requests (Layer H). Clinical, non-judgemental,
+# and it redirects to safe care rather than explaining what was detected.
+HARMFUL_REQUEST_MESSAGE = (
+    "I can't help with this request because it could put a patient's safety at risk or conflicts "
+    "with established standards of medical ethics. If you're facing a clinical situation, I can help "
+    "with evidence-based, safe treatment options or with how to raise a concern through the "
+    "appropriate clinical or ethics channels. If someone is in immediate danger, contact your local "
+    "emergency number."
+)
+
 # Shown when the model's answer cannot be verified against retrieved evidence.
 WITHHELD_MESSAGE = (
     "I couldn't verify enough of this response against the retrieved clinical "
@@ -51,6 +61,7 @@ DEFAULT_TOGGLES: dict[str, bool] = {
     "layer_guardrails": True,
     "layer_prompt_guard": True,
     "layer_template_matcher": True,
+    "layer_harm_classifier": True,
     "layer_prompt_hardening": True,
 }
 
@@ -215,17 +226,19 @@ class ClinicalDefenseGateway:
                 prior_user_turns,
                 disable_layer_a=not self._on("layer_prompt_guard"),
                 disable_layer_b=not self._on("layer_template_matcher"),
+                disable_layer_h=not self._on("layer_harm_classifier"),
             )
             if self.log_decisions:
                 log_decision(decision, conversation_id, None, san.message.detector_text)
 
             if decision.action == "BLOCK":
+                refusal = HARMFUL_REQUEST_MESSAGE if decision.category == "HARMFUL_REQUEST" else BLOCK_MESSAGE
                 emit("sources", [])
                 emit("security_status", {"action": "BLOCK", "category": decision.category})
-                emit("token", BLOCK_MESSAGE)
+                emit("token", refusal)
                 return GatewayResult(
                     status="BLOCKED",
-                    response_text=BLOCK_MESSAGE,
+                    response_text=refusal,
                     user_text=user_text,
                     decision=decision,
                     trace=trace,
@@ -235,6 +248,7 @@ class ClinicalDefenseGateway:
                         "pg": decision.pg_score,
                         "tm": decision.tm_max_sim,
                         "n_components": decision.tm_n_components,
+                        "harm": decision.harm_score,
                     },
                 )
             if decision.action == "FLAG":

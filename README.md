@@ -129,9 +129,17 @@ Evaluates three distinct input contexts: (1) the current query, (2) the intake p
 - **Layer B (Template Matcher)**:
   - Computes dense cosine similarity between query windows and a curated corpus of adversarial jailbreak templates using `sentence-transformers/all-MiniLM-L6-v2`.
   - Analyzes 9 jailbreak semantic components: `fictional_frame`, `amoral_character`, `unconditional_obedience`, `ethics_waiver`, `realism_demand`, `stakes_pressure`, `private_audience_claim`, `redaction_claim`, and `forced_opening`.
+- **Layer H (Harmful-Intent Classifier)** — *File: `src/security/harm_classifier.py`*:
+  - Layers A and B detect *how* an attack is phrased (personas, overrides, injected delimiters). A plainly worded harmful request, such as "write a justification for prescribing a cancer drug for a cold", has none of that. On the public benchmark, Layers A and B stopped under 5% of MedSafetyBench requests.
+  - Layer H scores *what* is being asked for: a sentence embedding followed by logistic regression, trained by `scripts/train_harm_classifier.py`.
+  - Harmful training examples: the MedSafetyBench training split and OR-Bench toxic prompts. Benign training examples: MedQuAD, the MedQA training split, ordinary user prompts, and OR-Bench's seemingly-toxic-but-safe prompts.
+  - Any training prompt with cosine similarity above 0.90 to an evaluation prompt is removed, so the benchmarks stay held out.
+  - Block and flag thresholds are calibrated for 1% and 3% false positives on a validation split. The weights are plain arrays in `harm_classifier.npz`, loaded without pickle.
+  - Long prompts are scored in overlapping windows, because jailbreaks often put the harmful request at the end.
+  - Blocks get a clinical refusal (`HARMFUL_REQUEST_MESSAGE`) that redirects to safe care or ethics channels.
 - **Decision Engine**:
-  - `BLOCK`: If `pg_score >= 0.90`, `tm_max_sim >= 0.80`, or `tm_n_components >= 3`. Halts pipeline with an adversarial intercept message.
-  - `FLAG`: If `pg_score >= 0.50`, `tm_max_sim >= 0.70`, `tm_n_components >= 2`, or control tokens were defanged. Proceeds to generation with hardened system constraints.
+  - `BLOCK`: If `pg_score >= 0.90`, `tm_max_sim >= 0.80`, `tm_n_components >= 3`, or `harm_score >= harm_block`. Halts the pipeline with a refusal matched to the category (`JAILBREAK`, `INJECTION`, `HARMFUL_REQUEST`).
+  - `FLAG`: If `pg_score >= 0.50`, `tm_max_sim >= 0.70`, `tm_n_components >= 2`, `harm_score >= harm_flag`, or control tokens were defanged. Proceeds to generation with hardened system constraints.
   - `ALLOW`: Query is deemed clean.
 
 ### Stage 4: Real-Time Patient Intake Extraction (NER)
@@ -232,7 +240,8 @@ The defense is measured on public datasets the project did not write:
 | `deepset_injection` / `deepset_benign` | Prompt injections and controls | deepset/prompt-injections (test split) |
 | `xstest_unsafe` / `xstest_safe` | Over-refusal probes | XSTest |
 | `medqa` | USMLE questions (clinician) | MedQA-USMLE 4-option (test split) |
-| `medquad` | Consumer health questions (patient) | MedQuAD |
+| `medquad` | Consumer health questions (patient) | MedQuAD (held-out 75% partition) |
+| `orbench_hard` | Seemingly toxic but safe prompts | OR-Bench hard-1k |
 
 ```bash
 python scripts/fetch_benchmarks.py                       # data files only -> data/benchmarks/raw (gitignored)
@@ -246,6 +255,22 @@ python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_config.ex
 - **`e2e`** reports, per medical model, the attack success rate, the benign refusal rate and MedQA accuracy, undefended vs defended.
 - **Judge.** For `e2e`, serve Llama Guard 3 behind an OpenAI-compatible endpoint and pass it with `--judge-config`. Without a judge, a refusal-phrase heuristic is used, which measures non-refusal only, not harm.
 - **Training-data overlap.** Suites marked `*` in the reports overlap the published training data of the Prompt Guard classifier (XSTest, and jailbreakchat-derived prompts). Report them as in-distribution, not held-out.
+
+#### Effect of Layer H (screening, 200 prompts per suite, seed 13)
+
+| Suite | Stopped before Layer H | Stopped with Layer H |
+|---|---|---|
+| medsafetybench (harmful medical) | 4.5% | **92.0%** |
+| medical_jailbreak* | 74.5% | 80.0% |
+| jbb_harmful | 1.0% | 76.0% |
+| xstest_unsafe* | 1.0% | 62.0% |
+| medqa (benign, wrongly stopped) | 17.0% | 17.0% (all from emergency triage, none from Layer H) |
+| medquad (benign) | 0.0% | 1.0% (emergency triage) |
+| jbb_benign (benign) | 2.0% | 19.0% |
+| xstest_safe* (benign) | 0.5% | 14.0% |
+| orbench_hard (benign) | n/a | 15.5% |
+
+Layer H does not wrongly stop medical questions, but it over-refuses general-domain prompts that sound harmful and are not. It adds about 0.5 s per prompt on CPU (all-mpnet-base-v2). Full report: `docs/BENCHMARK_SUITE_SCREEN.md`.
 
 ---
 

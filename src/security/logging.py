@@ -33,6 +33,7 @@ def log_decision(
         "pg_score": decision.pg_score,
         "tm_max_sim": round(decision.tm_max_sim, 4),
         "tm_n_components": decision.tm_n_components,
+        "harm_score": decision.harm_score,
         "top_templates": decision.top_templates[:3],
         "sanitize_notes": decision.sanitize_notes,
         "reasons": decision.reasons,

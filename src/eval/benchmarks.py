@@ -21,6 +21,7 @@ Benign
   jbb_benign           JailbreakBench benign behaviours matched to the harmful ones
   deepset_benign       deepset prompt-injection test split, label 0
   xstest_safe          XSTest safe prompts that *look* unsafe (over-refusal)
+  orbench_hard         OR-Bench hard-1k seemingly-toxic but safe prompts (over-refusal)
 
 ``seen_by_layer_a`` marks suites that overlap the training data listed on the
 ProtectAI prompt-injection model card (XSTest, jackhhao/jailbreak-classification,
@@ -65,6 +66,7 @@ SUITES: dict[str, dict] = {
     "jbb_benign":        {"kind": "benign"},
     "deepset_benign":    {"kind": "benign"},
     "xstest_safe":       {"kind": "benign", "seen": True},
+    "orbench_hard":      {"kind": "benign"},
 }
 
 _PLACEHOLDER_RE = re.compile(r"\[(?:INSERT PROMPT HERE|PROMPT|INSERT QUESTION HERE|YOUR PROMPT HERE)\]", re.I)
@@ -96,6 +98,26 @@ def _medsafety_requests() -> list[tuple[str, str]]:
 def _wild_templates() -> list[str]:
     df = _pd().read_parquet(_require(RAW / "in_the_wild" / "jailbreak_2023_12_25.parquet"))
     return [str(p) for p in df["prompt"].dropna()]
+
+
+def partition(text: str) -> str:
+    """Stable 25% / 75% train/test split for sources used both to train and to evaluate.
+
+    Only MedQuAD needs this: its questions serve as benign training examples for
+    the harmful-intent classifier and as a benign evaluation suite.
+    """
+    import hashlib
+
+    digest = hashlib.md5(" ".join(text.lower().split()).encode("utf-8")).hexdigest()
+    return "train" if int(digest[:8], 16) % 4 == 0 else "test"
+
+
+def medquad_questions() -> list[tuple[str, str, str, dict]]:
+    pd = _pd()
+    df = pd.read_csv(_require(RAW / "medquad" / "medDataset_processed.csv"))
+    df = df.dropna(subset=["Question"]).drop_duplicates(subset=["Question"])
+    return [(str(i), str(q).replace("? ?", "?").strip(), str(t), {}) for i, q, t in
+            zip(df.index, df["Question"], df["qtype"])]
 
 
 def _load_raw(suite: str, rng: random.Random) -> list[tuple[str, str, str, dict]]:
@@ -146,11 +168,12 @@ def _load_raw(suite: str, rng: random.Random) -> list[tuple[str, str, str, dict]
                             {"answer": row["answer_idx"]}))
         return out
 
+    if suite == "orbench_hard":
+        df = pd.read_csv(_require(RAW / "orbench" / "or-bench-hard-1k.csv")).dropna(subset=["prompt"])
+        return [(str(i), str(p), str(c), {}) for i, p, c in zip(df.index, df["prompt"], df["category"])]
+
     if suite == "medquad":
-        df = pd.read_csv(_require(RAW / "medquad" / "medDataset_processed.csv"))
-        df = df.dropna(subset=["Question"]).drop_duplicates(subset=["Question"])
-        return [(str(i), str(q).replace("? ?", "?").strip(), str(t), {}) for i, q, t in
-                zip(df.index, df["Question"], df["qtype"])]
+        return [row for row in medquad_questions() if partition(row[1]) == "test"]
 
     raise KeyError(f"Unknown suite {suite!r}; choose from {sorted(SUITES)}")
 

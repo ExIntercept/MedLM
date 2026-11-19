@@ -57,4 +57,14 @@ def warmup() -> None:
     except Exception as exc:
         logger.error("[Security warmup] Template Matcher failed: %s", exc)
 
+    # Layer H: harmful-intent classifier
+    try:
+        from src.security.harm_classifier import get_harm_classifier
+        hc = get_harm_classifier(device)
+        if hc is not None:
+            hc.score("warmup")
+            logger.info("[Security warmup] Harm classifier ready.")
+    except Exception as exc:
+        logger.error("[Security warmup] Harm classifier failed: %s", exc)
+
     logger.info("[Security warmup] Complete.")

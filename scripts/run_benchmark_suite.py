@@ -75,8 +75,10 @@ def _mode(item: BenchItem) -> str:
 
 ABLATIONS = {
     "full": {},
-    "prompt_guard_only": {"layer_template_matcher": False},
-    "template_matcher_only": {"layer_prompt_guard": False},
+    "without_harm_classifier": {"layer_harm_classifier": False},
+    "prompt_guard_only": {"layer_template_matcher": False, "layer_harm_classifier": False},
+    "template_matcher_only": {"layer_prompt_guard": False, "layer_harm_classifier": False},
+    "harm_classifier_only": {"layer_prompt_guard": False, "layer_template_matcher": False},
 }
 
 
@@ -125,6 +127,7 @@ def run_screen(items: list[BenchItem], ablate: bool, seed: int = 13, limit=None)
                 "status": r.status, "flagged": r.flagged,
                 "action": d.action if d else None, "category": d.category if d else None,
                 "pg": d.pg_score if d else None, "tm": round(d.tm_max_sim, 4) if d else None,
+                "harm": d.harm_score if d else None,
                 "reasons": d.reasons if d else [], "ms": round(ms, 1),
             }
             rows.append(row)
