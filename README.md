@@ -134,7 +134,7 @@ Evaluates three distinct input contexts: (1) the current query, (2) the intake p
   - Layer H scores *what* is being asked for: a sentence embedding followed by logistic regression, trained by `scripts/train_harm_classifier.py`.
   - Harmful training examples: the MedSafetyBench training split and OR-Bench toxic prompts. Benign training examples: MedQuAD, the MedQA training split, ordinary user prompts, and OR-Bench's seemingly-toxic-but-safe prompts.
   - Any training prompt with cosine similarity above 0.90 to an evaluation prompt is removed, so the benchmarks stay held out.
-  - Block and flag thresholds are calibrated for 1% and 3% false positives on a validation split. The weights are plain arrays in `harm_classifier.npz`, loaded without pickle.
+  - Block and flag thresholds are calibrated on out-of-fold scores so that every benign source (including harmless but alarming-sounding prompts) stays at or below 1% (block) and 3% (flag) false positives. The weights are plain arrays in `harm_classifier.npz`, loaded without pickle.
   - Long prompts are scored in overlapping windows, because jailbreaks often put the harmful request at the end.
   - Blocks get a clinical refusal (`HARMFUL_REQUEST_MESSAGE`) that redirects to safe care or ethics channels.
 - **Decision Engine**:
@@ -258,19 +258,21 @@ python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_config.ex
 
 #### Effect of Layer H (screening, 200 prompts per suite, seed 13)
 
-| Suite | Stopped before Layer H | Stopped with Layer H |
-|---|---|---|
-| medsafetybench (harmful medical) | 4.5% | **92.0%** |
-| medical_jailbreak* | 74.5% | 80.0% |
-| jbb_harmful | 1.0% | 76.0% |
-| xstest_unsafe* | 1.0% | 62.0% |
-| medqa (benign, wrongly stopped) | 17.0% | 17.0% (all from emergency triage, none from Layer H) |
-| medquad (benign) | 0.0% | 1.0% (emergency triage) |
-| jbb_benign (benign) | 2.0% | 19.0% |
-| xstest_safe* (benign) | 0.5% | 14.0% |
-| orbench_hard (benign) | n/a | 15.5% |
+| Suite | Before Layer H | Layer H, pooled calibration | Layer H, worst-source calibration (current) |
+|---|---|---|---|
+| medsafetybench (harmful medical) | 4.5% | 92.0% | **89.5%** |
+| medical_jailbreak* | 74.5% | 80.0% | 80.5% |
+| jbb_harmful | 1.0% | 76.0% | 69.0% |
+| xstest_unsafe* | 1.0% | 62.0% | 55.0% |
+| medqa (benign, wrongly stopped) | 17.0% | 17.0% | 17.0% (all emergency triage, none from Layer H) |
+| medquad (benign) | 0.0% | 1.0% | 1.0% (emergency triage) |
+| jbb_benign (benign) | 2.0% | 19.0% | 17.0% |
+| xstest_safe* (benign) | 0.5% | 14.0% | 9.0% |
+| orbench_hard (benign) | n/a | 15.5% | 10.0% |
 
-Layer H does not wrongly stop medical questions, but it over-refuses general-domain prompts that sound harmful and are not. It adds about 0.5 s per prompt on CPU (all-mpnet-base-v2). Full report: `docs/BENCHMARK_SUITE_SCREEN.md`.
+The first calibration held benign false positives at 1% *pooled* over all benign sources. Easy negatives (MedQA vignettes score near zero) hid a 2.9% rate on harmless prompts that only sound alarming. The current thresholds come from 5-fold out-of-fold scores and keep *every* benign source at or below 1% (block) and 3% (flag). 8,000 OR-Bench hard negatives are used instead of 3,000.
+
+Layer H does not wrongly stop medical questions. It still over-refuses some general-domain prompts that sound harmful but are not (9–17% on the held-out over-refusal suites, which are harder than the validation data). It adds about 0.5 s per prompt on CPU (all-mpnet-base-v2). Full report: `docs/BENCHMARK_SUITE_SCREEN.md`.
 
 ---
 

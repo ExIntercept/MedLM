@@ -13,8 +13,12 @@ Training data (none of it is used for evaluation):
 Every training prompt with cosine similarity > 0.90 to any evaluation prompt is
 dropped, so no benchmark item (or near-copy of one) leaks into training.
 
-Thresholds are calibrated on a 20% validation split: ``block`` keeps the benign
-false-positive rate at or below 1%, ``flag`` at or below 3%.
+Thresholds are calibrated on out-of-fold scores (5-fold cross-validation, so
+every score comes from a model that did not see that prompt) against the
+*worst* benign source, not the pooled benign set. A pooled 1% budget is
+dominated by easy negatives (MedQA vignettes score near zero) and hides a much
+higher rate on harmless prompts that merely sound alarming. ``block`` keeps
+every benign source at or below 1% false positives, ``flag`` at or below 3%.
 
     python scripts/fetch_benchmarks.py
     python scripts/train_harm_classifier.py
@@ -77,20 +81,38 @@ def threshold_for_fpr(neg_scores: np.ndarray, max_fpr: float) -> float:
     return float(s[k]) + 1e-6
 
 
+def worst_group_threshold(scores: np.ndarray, y: np.ndarray, sources: np.ndarray, max_fpr: float) -> float:
+    """Smallest threshold that keeps *each* benign source at or below max_fpr."""
+    neg = (y == 0)
+    return max(threshold_for_fpr(scores[neg & (sources == s)], max_fpr) for s in np.unique(sources[neg]))
+
+
+def oof_scores(X: np.ndarray, y: np.ndarray, C: float, seed: int, folds: int = 5) -> np.ndarray:
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedKFold
+
+    out = np.zeros(len(y), dtype=np.float64)
+    for tr, te in StratifiedKFold(folds, shuffle=True, random_state=seed).split(X, y):
+        clf = LogisticRegression(C=C, class_weight="balanced", max_iter=3000).fit(X[tr], y[tr])
+        out[te] = clf.predict_proba(X[te])[:, 1]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--embed-model", default="sentence-transformers/all-MiniLM-L6-v2")
     ap.add_argument("--n-medquad", type=int, default=1500)
     ap.add_argument("--n-medqa", type=int, default=3000)
     ap.add_argument("--n-regular", type=int, default=1500)
-    ap.add_argument("--n-orbench", type=int, default=3000)
+    ap.add_argument("--n-orbench", type=int, default=8000)
+    ap.add_argument("--block-fpr", type=float, default=0.01, help="max FPR per benign source at block")
+    ap.add_argument("--flag-fpr", type=float, default=0.03, help="max FPR per benign source at flag")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", type=Path, default=WEIGHTS_PATH)
     args = ap.parse_args()
 
     from sentence_transformers import SentenceTransformer
     from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import train_test_split
 
     rng = random.Random(args.seed)
     harmful, harmful_sources, benign, benign_sources = load_training_data(
@@ -129,37 +151,37 @@ def main():
     X = np.vstack([h_emb, b_emb])
     y = np.array([1] * len(h_emb) + [0] * len(b_emb))
     src = np.array(harmful_sources + benign_sources)
-    X_tr, X_val, y_tr, y_val, s_tr, s_val = train_test_split(
-        X, y, src, test_size=0.2, stratify=y, random_state=args.seed)
 
     best = None
     for C in (0.5, 1.0, 2.0, 4.0, 8.0):
-        clf = LogisticRegression(C=C, class_weight="balanced", max_iter=2000).fit(X_tr, y_tr)
-        p = clf.predict_proba(X_val)[:, 1]
-        t_block = threshold_for_fpr(p[y_val == 0], 0.01)
-        tpr = float((p[y_val == 1] >= t_block).mean())
-        print(f"  C={C:<4}  val TPR at 1% FPR = {tpr:.3f}")
+        p = oof_scores(X, y, C, args.seed)
+        t_block = worst_group_threshold(p, y, src, args.block_fpr)
+        tpr = float((p[y == 1] >= t_block).mean())
+        print(f"  C={C:<4}  out-of-fold TPR at worst-source {args.block_fpr:.0%} FPR = {tpr:.3f}")
         if best is None or tpr > best[0]:
-            best = (tpr, C)
-    C = best[1]
+            best = (tpr, C, p)
+    _, C, p = best
 
-    clf = LogisticRegression(C=C, class_weight="balanced", max_iter=2000).fit(X_tr, y_tr)
-    p = clf.predict_proba(X_val)[:, 1]
-    t_block = threshold_for_fpr(p[y_val == 0], 0.01)
-    t_flag = min(t_block, threshold_for_fpr(p[y_val == 0], 0.03))
+    t_block = worst_group_threshold(p, y, src, args.block_fpr)
+    t_flag = min(t_block, worst_group_threshold(p, y, src, args.flag_fpr))
     val = {
-        "tpr_at_block": float((p[y_val == 1] >= t_block).mean()),
-        "tpr_at_flag": float((p[y_val == 1] >= t_flag).mean()),
-        "fpr_at_block": float((p[y_val == 0] >= t_block).mean()),
-        "fpr_at_flag": float((p[y_val == 0] >= t_flag).mean()),
-        "fpr_by_source_at_block": {s: float((p[(y_val == 0) & (s_val == s)] >= t_block).mean())
+        "method": f"5-fold out-of-fold scores, worst benign source <= {args.block_fpr:.0%} (block) / "
+                  f"{args.flag_fpr:.0%} (flag)",
+        "tpr_at_block": float((p[y == 1] >= t_block).mean()),
+        "tpr_at_flag": float((p[y == 1] >= t_flag).mean()),
+        "fpr_at_block": float((p[y == 0] >= t_block).mean()),
+        "fpr_at_flag": float((p[y == 0] >= t_flag).mean()),
+        "fpr_by_source_at_block": {s: float((p[(y == 0) & (src == s)] >= t_block).mean())
                                    for s in sorted(set(benign_sources))},
-        "tpr_by_source_at_block": {s: float((p[(y_val == 1) & (s_val == s)] >= t_block).mean())
+        "fpr_by_source_at_flag": {s: float((p[(y == 0) & (src == s)] >= t_flag).mean())
+                                  for s in sorted(set(benign_sources))},
+        "tpr_by_source_at_block": {s: float((p[(y == 1) & (src == s)] >= t_block).mean())
                                    for s in sorted(set(harmful_sources))},
     }
 
-    # Refit on all training data, keeping the validation-calibrated thresholds.
-    clf = LogisticRegression(C=C, class_weight="balanced", max_iter=2000).fit(X, y)
+    # Final model on all training data. Its scores track the out-of-fold models'
+    # closely (same C, 25% more data), so the thresholds carry over.
+    clf = LogisticRegression(C=C, class_weight="balanced", max_iter=3000).fit(X, y)
     meta = {
         "embed_model_id": args.embed_model,
         "C": C,
