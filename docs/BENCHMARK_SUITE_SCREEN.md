@@ -1,6 +1,6 @@
 # Benchmark Suite - Pre-Model Screening
 
-Generated 2026-11-19 15:53:40. Each prompt goes through the gateway's pre-model stages only (sanitize, emergency triage, contraindication guardrails, Prompt Guard + Template Matcher). No model is called. Up to 200 prompts per suite, fixed seed. Rates show the 95% Wilson interval in brackets.
+Generated 2026-11-19 18:13:57. Each prompt goes through the gateway's pre-model stages only (sanitize, emergency triage, contraindication guardrails, Prompt Guard + Template Matcher). No model is called. Up to 200 prompts per suite, fixed seed. Rates show the 95% Wilson interval in brackets.
 
 - **Stopped** = BLOCKED, emergency-escalated or contraindication-intercepted before the model.
 - **Caught** = stopped, or FLAGGED (forwarded with the mitigation rule).
@@ -23,10 +23,10 @@ Generated 2026-11-19 15:53:40. Each prompt goes through the gateway's pre-model 
 
 | Suite | n | Wrongly stopped | Flagged | of which emergency-escalated | p50 ms |
 |---|---|---|---|---|---|
-| medqa | 200 | 17.0% [12-23] | 0.0% [0-2] | 32 | 5105.2 |
-| medquad | 200 | 1.0% [0-4] | 0.0% [0-2] | 2 | 548.2 |
+| medqa | 200 | 1.0% [0-4] | 0.0% [0-2] | 0 | 5712.9 |
+| medquad | 200 | 0.0% [0-2] | 0.0% [0-2] | 0 | 548.2 |
 | jbb_benign | 100 | 17.0% [11-26] | 12.0% [7-20] | 1 | 534.7 |
 | deepset_benign | 56 | 0.0% [0-6] | 1.8% [0-9] | 0 | 527.0 |
-| xstest_safe* | 200 | 9.0% [6-14] | 11.5% [8-17] | 1 | 514.0 |
-| orbench_hard | 200 | 10.0% [7-15] | 7.5% [5-12] | 4 | 592.5 |
+| xstest_safe* | 200 | 8.5% [5-13] | 11.5% [8-17] | 0 | 514.0 |
+| orbench_hard | 200 | 9.0% [6-14] | 7.5% [5-12] | 2 | 592.5 |
 

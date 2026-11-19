@@ -112,6 +112,11 @@ Every user query flows through an 8-stage clinical pipeline designed to prevent 
   - **Surgical Abdomen & Hemorrhage**: Rigid abdomen, massive hematemesis.
   - **Psychiatric**: Active acute suicidal ideation with imminent intent.
 - **Immediate Escalation**: If matched, immediately halts processing, instructs the patient to seek urgent emergency care (911/ER), and logs the event without making any LLM call.
+- **Framing check**: Red-flag symptoms also appear in nearly every cardiology vignette. Without this check, 11% of MedQA questions got the emergency warning instead of an answer. A red flag is let through to the model only when the text is clearly a case discussion and nobody describes themselves or someone close to them. Case discussions are:
+  - an exam-style question, in any mode,
+  - a third-person vignette ("A 65-year-old man presents…"), in clinician mode only,
+  - a short topic question ("What is aphasia?").
+- **Anything personal still escalates**: "I", "my father", "our baby", "someone near me" or "right now". Quoted speech inside a vignette and Roman-numeral "I" (ECG lead I, type I diabetes) are ignored. In patient mode, a third-person description without exam framing still escalates. Regression cases are in `tests/test_emergency_triage_framing.py`.
 
 ### Stage 2: Deterministic Adversarial Guardrails (Layer 1)
 *File: `src/agents/guardrails.py`*
@@ -269,6 +274,15 @@ python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_config.ex
 | jbb_benign (benign) | 2.0% | 19.0% | 17.0% |
 | xstest_safe* (benign) | 0.5% | 14.0% | 9.0% |
 | orbench_hard (benign) | n/a | 15.5% | 10.0% |
+
+After the triage framing check (detector layers unchanged, attack rates unchanged), the benign rates are:
+- medqa **1.0%** (2 contraindication-guardrail intercepts, 0 emergency escalations)
+- medquad **0.0%**
+- xstest_safe 8.5%
+- orbench_hard 9.0%
+- jbb_benign 17.0%
+
+On the full datasets, no MedQA question (of 1,273) and no MedQuAD question (of 11,285) is escalated. Before the fix, 142 and 13 were.
 
 The first calibration held benign false positives at 1% *pooled* over all benign sources. Easy negatives (MedQA vignettes score near zero) hid a 2.9% rate on harmless prompts that only sound alarming. The current thresholds come from 5-fold out-of-fold scores and keep *every* benign source at or below 1% (block) and 3% (flag). 8,000 OR-Bench hard negatives are used instead of 3,000.
 

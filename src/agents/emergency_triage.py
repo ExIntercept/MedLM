@@ -80,7 +80,8 @@ _GI_RIGID_ABDOMEN = re.compile(r"\brigid\b.{0,15}\babdomen\b|\bboard[- ]like abd
 _TRAUMA_ARTERIAL_BLEED = re.compile(r"\b(uncontrolled|severe|heavy|spurting|won'?t stop)\b.{0,15}\bbleed\w*\b|\barterial bleed\w*\b", re.I)
 _TRAUMA_HEAD_LOC = re.compile(
     r"\bhead\b.{0,10}\b(trauma|injury|hit)\b.{0,30}\b(loss of consciousness|unconscious|passed out|blacked out)\b|"
-    r"\b(unconscious|loss of consciousness|passed out|blacked out)\b.{0,30}\bhead\b.{0,10}\b(trauma|injury|hit)\b",
+    r"\b(unconscious|loss of consciousness|passed out|blacked out)\b.{0,30}\bhead\b.{0,10}\b(trauma|injury|hit)\b|"
+    r"\b(hit|bang\w*|struck|injured)\b.{0,12}\bhead\b.{0,40}\b(loss of consciousness|unconscious|passed out|blacked out|knocked out)\b",
     re.I,
 )
 _SEPSIS_FEVER = _flags("fever", "high temperature")
@@ -164,3 +165,93 @@ def check_emergency_triage(text: str):
         if check(text):
             return label
     return None
+
+
+# ---------------------------------------------------------------------------
+# Framing: is someone in an emergency now, or is a case being discussed?
+# ---------------------------------------------------------------------------
+# Red-flag symptoms appear in every cardiology vignette and exam question. Those
+# are not a person in crisis, and escalating them stops the clinician from
+# getting an answer (11% of MedQA questions tripped the red flags). Escalation
+# stays the default: a red flag is only let through when the text is clearly a
+# case discussion AND nobody speaks about themselves or someone close to them.
+
+# Quoted speech inside a vignette ('He says, "I can't breathe"') is not the user.
+_QUOTED = re.compile(r'"[^"\n]{0,400}"|“[^”\n]{0,400}”')
+_PERSONAL = re.compile(
+    r"\b(?:i|i'm|i've|i'd|i'll|me|my|mine|myself|we|we're|our|ours)\b"
+    r"|\b(?-i:us|Us)\b",  # "us", but not "US" (ultrasound); no "im" (intramuscular)
+    re.IGNORECASE,
+)
+_VIGNETTE = re.compile(
+    r"^\s*(?:a|an)\s+(?:\d+(?:\.\d+)?|[a-z]+(?:-[a-z]+)*)[- ](?:year|month|week|day|hour)s?[- ]old\b"
+    r"|^\s*(?:a|an|the)\s+(?:patient|man|woman|boy|girl|infant|neonate|newborn|child|toddler|adolescent)\b"
+    r"|\b(?:presents|presented|is brought|was brought|comes|came)\b.{0,20}\bto (?:the |his |her |a )?"
+    r"(?:emergency department|clinic|physician|office|hospital|primary care)",
+    re.IGNORECASE,
+)
+_EXAM = re.compile(
+    r"\bwhich of the following\b"
+    r"|\bmost (?:likely|appropriate|common)\b.{0,40}\b(?:diagnosis|cause|explanation|step|treatment|management|finding)\b"
+    r"|\bnext best step\b"
+    r"|^\s*\(?[A-E][).]\s",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+# Roman numeral "I" is not the pronoun: leads I and aVL, type I diabetes, Mobitz I.
+_ROMAN_I = re.compile(
+    r"\b(?:leads?|type|grade|class|stage|phase|factor|degree|mobitz|cn|nerve|tier|level|complex)\s+I\b"
+    r"|\bI\s*(?:,|and|or|/)\s*(?:II|aVL|aVR|aVF)\b",
+    re.IGNORECASE,
+)
+# Topic questions about a condition ("What is aphasia?", "What are the treatments
+# for syncope?"). The red-flag word is the subject, not a symptom someone has.
+_TOPIC_QUESTION = re.compile(
+    r"^\s*(?:what (?:is|are)(?: \(are\))?|what causes|what research|who is at risk|how many people"
+    r"|how (?:is|are)\b.{1,60}\b(?:diagnosed|treated|prevented|inherited)|is\b.{1,60}\binherited"
+    r"|(?:do|does|can|could)\b.{1,60}\b(?:cause|lead to|be treated|be cured))\b",
+    re.IGNORECASE,
+)
+_URGENT_ASIDE = re.compile(r"\b(?:someone|somebody|right now|currently having|what (?:do|should|can) (?:i|we|you) do)\b",
+                           re.IGNORECASE)
+
+
+def speaks_personally(text: str) -> bool:
+    """True if the writer talks about themselves or someone close to them."""
+    return bool(_PERSONAL.search(_ROMAN_I.sub(" ", _QUOTED.sub(" ", text))))
+
+
+def is_topic_question(text: str) -> bool:
+    """A short question about a condition itself, with no one described as having it."""
+    t = text.strip()
+    return (len(t) <= 200 and bool(_TOPIC_QUESTION.search(t)) and not _URGENT_ASIDE.search(t)
+            and not speaks_personally(t))
+
+
+def is_case_discussion(text: str, mode: str = "patient") -> bool:
+    """True for a third-person clinical vignette, an exam-style question, or a
+    short topic question about a condition ("What is aphasia?").
+
+    Exam formats and topic questions count in any mode. A bare vignette counts only in clinician
+    mode: in patient mode, a lay user describing someone else's symptoms in the
+    third person should still be told to call emergency services.
+    """
+    if speaks_personally(text):
+        return False
+    if _EXAM.search(text) or is_topic_question(text):
+        return True
+    return mode == "clinician" and bool(_VIGNETTE.search(text))
+
+
+def triage(text: str, mode: str = "patient"):
+    """Return ``(category, escalate)``.
+
+    ``category`` is the red-flag category found (or None). ``escalate`` is
+    False when red flags appear only inside a case discussion, so the request
+    can go to the model instead of returning the emergency warning.
+    """
+    category = check_emergency_triage(text)
+    if category is None:
+        return None, False
+    return category, not is_case_discussion(text, mode)

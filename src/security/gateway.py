@@ -175,11 +175,15 @@ class ClinicalDefenseGateway:
 
         # ── 2. Emergency triage ────────────────────────────────────────
         if self._on("layer_triage"):
-            from src.agents.emergency_triage import EMERGENCY_WARNING, check_emergency_triage
+            from src.agents.emergency_triage import EMERGENCY_WARNING, triage
 
             trace.append("triage")
-            category = check_emergency_triage(user_text)
-            if category:
+            category, escalate = triage(user_text, mode=mode)
+            if category and not escalate:
+                # Red flags inside a case discussion or exam question: answer it.
+                trace.append("triage_case_discussion")
+                emit("triage_status", {"level": "CASE_DISCUSSION", "category": category})
+            if category and escalate:
                 emit("sources", [])
                 emit("triage_status", {"level": "EMERGENCY", "category": category})
                 emit("token", EMERGENCY_WARNING)
