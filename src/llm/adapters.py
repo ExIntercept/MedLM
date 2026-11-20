@@ -175,8 +175,9 @@ def _render_chatml(msgs: list[Message]) -> str:
     return "".join(out) + "<|im_start|>assistant\n"
 
 
-# No literal BOS (<|begin_of_text|>, <s>, <bos>) in any template: completion
-# servers such as vLLM add it when tokenizing, and a doubled BOS degrades output.
+# Templates carry no BOS. CompletionsAdapter prepends it (see TEMPLATE_BOS) and
+# asks the server not to add its own, because tokenizers disagree: Llama 3.1's
+# adds BOS, OpenBioLLM's does not (without it the model echoes the question).
 def _render_llama3(msgs: list[Message]) -> str:
     out = []
     for m in msgs:
@@ -208,6 +209,10 @@ TEMPLATES: dict[str, tuple[Callable[[list[Message]], str], list[str]]] = {
     "plain": (_render_plain, ["<end_of_turn>", "<start_of_turn>", "<|im_end|>", "<|im_start|>"]),
 }
 _TEMPLATE_ALIASES = {"chat": "chatml", "base": "plain", "llama": "llama3", "none": "plain"}
+
+# Beginning-of-sequence token each template's models were trained with. ChatML
+# (Qwen-style) models use none; base models get the server's default.
+TEMPLATE_BOS = {"gemma": "<bos>", "llama3": "<|begin_of_text|>", "mistral": "<s>", "chatml": "", "plain": None}
 
 
 def render_template(template: str, messages: list[Message]) -> str:
@@ -259,6 +264,11 @@ class CompletionsAdapter:
         stop = TEMPLATES[self.template][1]
         if stop:
             payload["stop"] = stop
+        bos = TEMPLATE_BOS.get(self.template)
+        if bos is not None:
+            # Exactly one BOS whatever the tokenizer does (vLLM honours this flag).
+            payload["prompt"] = bos + prompt
+            payload["add_special_tokens"] = False
         response = _post_stream(f"{self.base_url}/v1/completions", self.api_key, payload, self.name)
         try:
             for chunk in _iter_sse_json(response):

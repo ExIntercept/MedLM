@@ -236,6 +236,36 @@ def test_completions_adapter_renders_template_and_stops(monkeypatch):
     assert captured["url"] == "http://x/v1/completions"
     assert captured["payload"]["prompt"].endswith("<|start_header_id|>assistant<|end_header_id|>\n\n")
     assert "<|eot_id|>" in captured["payload"]["stop"]
+    # Exactly one BOS, written by us; the server is told not to add another.
+    assert captured["payload"]["prompt"].startswith("<|begin_of_text|><|start_header_id|>user")
+    assert captured["payload"]["prompt"].count("<|begin_of_text|>") == 1
+    assert captured["payload"]["add_special_tokens"] is False
+
+
+@pytest.mark.parametrize("template,bos", [("gemma", "<bos>"), ("mistral", "<s>"), ("chatml", "")])
+def test_completions_adapter_bos_per_template(monkeypatch, template, bos):
+    captured = {}
+
+    def fake_post(url, headers, json, stream, timeout):
+        captured.update(payload=json)
+        return _FakeResponse([{"choices": [{"text": "ok"}]}])
+
+    monkeypatch.setattr(adapters.requests, "post", fake_post)
+    list(CompletionsAdapter("http://x", "m", template=template).stream([{"role": "user", "content": "hi"}]))
+    assert captured["payload"]["prompt"].startswith(bos)
+    assert captured["payload"]["add_special_tokens"] is False
+
+
+def test_completions_adapter_plain_keeps_server_default(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers, json, stream, timeout):
+        captured.update(payload=json)
+        return _FakeResponse([{"choices": [{"text": "ok"}]}])
+
+    monkeypatch.setattr(adapters.requests, "post", fake_post)
+    list(CompletionsAdapter("http://x", "m", template="plain").stream([{"role": "user", "content": "hi"}]))
+    assert "add_special_tokens" not in captured["payload"]
 
 
 # ---------------------------------------------------------------------------
