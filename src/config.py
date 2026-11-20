@@ -74,6 +74,13 @@ PROMPT_GUARD_MODEL_ID = os.environ.get(
     "PROMPT_GUARD_MODEL_ID", "ProtectAI/deberta-v3-base-prompt-injection-v2"
 )
 
+# Layer G – Llama Guard input moderation, served behind an OpenAI-compatible
+# /v1/chat/completions endpoint (Ollama: GUARD_BASE_URL=http://localhost:11434,
+# GUARD_MODEL=llama-guard3:1b; vLLM: meta-llama/Llama-Guard-3-1B). Unset = layer off.
+GUARD_BASE_URL = os.environ.get("GUARD_BASE_URL", "").rstrip("/")
+GUARD_MODEL = os.environ.get("GUARD_MODEL", "")
+GUARD_API_KEY = os.environ.get("GUARD_API_KEY", "")
+
 # Layer B – Template Matcher embedding model (all-MiniLM-L6-v2 is already cached)
 TEMPLATE_EMBED_MODEL_ID = os.environ.get(
     "TEMPLATE_EMBED_MODEL_ID", "sentence-transformers/all-MiniLM-L6-v2"

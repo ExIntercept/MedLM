@@ -70,6 +70,11 @@ class DefenseDecision:
 
     harm_score: Optional[float] = None
     """Layer H harmful-intent score (max over texts). None if the layer did not run."""
+    guard_unsafe: Optional[bool] = None
+    """Layer G (Llama Guard) verdict; None when the layer did not run."""
+
+    guard_categories: Optional[list] = None
+    """Llama Guard hazard codes, e.g. ["S1"]."""
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +111,7 @@ def run_input_defenses(
     disable_layer_a: bool = False,
     disable_layer_b: bool = False,
     disable_layer_h: bool = False,
+    disable_layer_g: bool = False,
 ) -> DefenseDecision:
     """Run Layer A (Prompt Guard), Layer B (Template Matcher) and Layer H
     (harmful-intent classifier) on sanitized inputs.
@@ -158,6 +164,7 @@ def run_input_defenses(
             disable_layer_a=disable_layer_a,
             disable_layer_b=disable_layer_b,
             disable_layer_h=disable_layer_h,
+            disable_layer_g=disable_layer_g,
         )
     except Exception as exc:
         logger.exception("Unexpected error in defense pipeline: %s", exc)
@@ -188,6 +195,7 @@ def _run_defenses_inner(
     disable_layer_a: bool = False,
     disable_layer_b: bool = False,
     disable_layer_h: bool = False,
+    disable_layer_g: bool = False,
 ) -> DefenseDecision:
     """Internal implementation; called from inside the try/except in run_input_defenses."""
     from pathlib import Path as _Path
@@ -317,9 +325,24 @@ def _run_defenses_inner(
             harm_flag = float(thresholds.get("harm_flag", hc.flag_threshold))
         harm_ms = (time.perf_counter() - t_h_start) * 1000.0
 
+    # Layer G - Llama Guard on the message (with recent turns for multi-turn
+    # attacks). Skipped when A/B already block or Layer H already blocks.
+    guard = None
+    harm_blocks = harm_score is not None and harm_block is not None and harm_score >= harm_block
+    if not disable_layer_g and not already_blocked and not harm_blocks:
+        from src.llm.adapters import LLMUnavailable
+        from src.security.llama_guard import get_input_guard
+
+        g = get_input_guard()
+        if g is not None:
+            try:
+                guard = g.classify(text_multiturn)
+            except LLMUnavailable as exc:
+                logger.warning("Llama Guard unavailable; Layer G bypassed: %s", exc)
+
     total_ms = (time.perf_counter() - t_total_start) * 1000.0
     latency_ms = {"pg": round(pg_ms, 1), "tm": round(tm_ms, 1), "harm": round(harm_ms, 1),
-                  "total": round(total_ms, 1)}
+                  "guard": guard.latency_ms if guard else 0.0, "total": round(total_ms, 1)}
 
     # ------------------------------------------------------------------
     # Decision logic
@@ -340,6 +363,9 @@ def _run_defenses_inner(
     if harm_score is not None and harm_score >= harm_block:
         do_block = True
         reasons.append("harm_block")
+    if guard is not None and guard.blocks:
+        do_block = True
+        reasons.append("guard_block")
 
     # FLAG conditions
     do_flag = False
@@ -396,7 +422,8 @@ def _run_defenses_inner(
             or tm_max_sim >= tm_flag
             or tm_n_components >= components_flag
         )
-        harm_fired = harm_score is not None and harm_score >= harm_flag
+        harm_fired = (harm_score is not None and harm_score >= harm_flag) or (
+            guard is not None and guard.blocks)
         only_sanitizer = (
             not do_block
             and not attack_framing
@@ -429,4 +456,6 @@ def _run_defenses_inner(
         reasons=reasons,
         latency_ms=latency_ms,
         harm_score=round(harm_score, 4) if harm_score is not None else None,
+        guard_unsafe=guard.unsafe if guard else None,
+        guard_categories=guard.categories if guard else None,
     )

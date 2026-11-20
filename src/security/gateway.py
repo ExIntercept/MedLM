@@ -62,6 +62,7 @@ DEFAULT_TOGGLES: dict[str, bool] = {
     "layer_prompt_guard": True,
     "layer_template_matcher": True,
     "layer_harm_classifier": True,
+    "layer_llama_guard": True,
     "layer_prompt_hardening": True,
 }
 
@@ -231,6 +232,7 @@ class ClinicalDefenseGateway:
                 disable_layer_a=not self._on("layer_prompt_guard"),
                 disable_layer_b=not self._on("layer_template_matcher"),
                 disable_layer_h=not self._on("layer_harm_classifier"),
+                disable_layer_g=not self._on("layer_llama_guard"),
             )
             if self.log_decisions:
                 log_decision(decision, conversation_id, None, san.message.detector_text)
