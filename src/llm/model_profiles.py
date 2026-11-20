@@ -40,6 +40,10 @@ class ModelProfile:
     instruction_tuned: bool = True
     """False for base models that only continue text."""
 
+    compact_prompt: bool = False
+    """Use the short hardened prompt. Small medical fine-tunes echo the full one
+    back (its persona text, or "The Answer is:") instead of answering."""
+
     chars_per_token: float = 3.4
     """Rough characters-per-token ratio used for context budgeting."""
 
@@ -53,16 +57,16 @@ MEDICAL_MODEL_PROFILES: list[tuple[str, ModelProfile]] = [
         notes="google/medgemma-4b-it, medgemma-27b-text-it; Gemma 3 turns. "
               "Supports far longer contexts; 8192 matches the Colab vLLM setting.")),
     (r"meditron.*70b", ModelProfile(
-        "Meditron-70B", "plain", 4096, system_role=False, instruction_tuned=False,
+        "Meditron-70B", "plain", 4096, system_role=False, instruction_tuned=False, compact_prompt=True,
         notes="Llama 2 base model; no chat template.")),
     (r"meditron", ModelProfile(
-        "Meditron-7B", "plain", 2048, system_role=False, instruction_tuned=False,
+        "Meditron-7B", "plain", 2048, system_role=False, instruction_tuned=False, compact_prompt=True,
         notes="epfl-llm/meditron-7b; Llama 2 base model, 2048-token context.")),
     (r"biomistral", ModelProfile(
-        "BioMistral", "mistral", 2048, system_role=False,
+        "BioMistral", "mistral", 2048, system_role=False, compact_prompt=True,
         notes="BioMistral/BioMistral-7B; Mistral [INST] format, trained at 2048 tokens.")),
     (r"openbiollm", ModelProfile(
-        "OpenBioLLM", "llama3", 8192,
+        "OpenBioLLM", "llama3", 8192, compact_prompt=True,
         notes="aaditya/Llama3-OpenBioLLM-8B / 70B; Llama 3 instruct format.")),
     (r"med42.*(v2|llama3|llama-3)|llama3-med42", ModelProfile(
         "Med42-v2", "llama3", 8192,

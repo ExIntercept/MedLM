@@ -340,6 +340,7 @@ class ClinicalDefenseGateway:
                 return build_messages(
                     vignette, detected_options, _format_evidence(ev), hist,
                     forced_tone=forced_tone, patient_profile_text=profile_note, flagged=flagged,
+                    compact=bool(getattr(model_profile, "compact_prompt", False)),
                 )
             return _unhardened_messages(vignette, detected_options, _format_evidence(ev), hist, forced_tone, profile_note)
 
