@@ -175,15 +175,17 @@ def _render_chatml(msgs: list[Message]) -> str:
     return "".join(out) + "<|im_start|>assistant\n"
 
 
+# No literal BOS (<|begin_of_text|>, <s>, <bos>) in any template: completion
+# servers such as vLLM add it when tokenizing, and a doubled BOS degrades output.
 def _render_llama3(msgs: list[Message]) -> str:
-    out = ["<|begin_of_text|>"]
+    out = []
     for m in msgs:
         out.append(f"<|start_header_id|>{m['role']}<|end_header_id|>\n\n{m['content']}<|eot_id|>")
     return "".join(out) + "<|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
 def _render_mistral(msgs: list[Message]) -> str:
-    out = ["<s>"]
+    out = []
     for m in merge_system_into_user(msgs):
         if m["role"] == "user":
             out.append(f"[INST] {m['content']} [/INST]")

@@ -1,0 +1,9 @@
+[
+  {"model": "google/medgemma-4b-it",               "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"},
+  {"model": "aaditya/Llama3-OpenBioLLM-8B",        "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"},
+  {"model": "m42-health/Llama3-Med42-8B",          "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"},
+  {"model": "BioMistral/BioMistral-7B",            "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"},
+  {"model": "epfl-llm/meditron-7b",                "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"},
+  {"model": "FreedomIntelligence/HuatuoGPT-o1-7B", "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY", "max_tokens": 1536},
+  {"model": "meta-llama/Llama-3.1-8B-Instruct",    "base_url": "${COLAB_API_BASE}", "provider": "completions", "api_key_env": "COLAB_API_KEY"}
+]

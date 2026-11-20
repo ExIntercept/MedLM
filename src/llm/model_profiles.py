@@ -81,6 +81,10 @@ MEDICAL_MODEL_PROFILES: list[tuple[str, ModelProfile]] = [
         notes="FreedomIntelligence/HuatuoGPT-o1-8B / 70B; Llama 3.1 format.")),
     (r"bio-medical-llama-3|jsl-medllama-3|medllama3", ModelProfile(
         "Medical Llama 3 fine-tune", "llama3", 8192)),
+    # Not a medical model: the general-purpose control for cross-model evaluation.
+    (r"meta-llama/(meta-)?llama-3(\.\d)?-\d+b-instruct", ModelProfile(
+        "Llama 3.x Instruct (general control)", "llama3", 8192,
+        notes="meta-llama/Llama-3.1-8B-Instruct; shows whether medical fine-tuning changed vulnerability.")),
 ]
 
 

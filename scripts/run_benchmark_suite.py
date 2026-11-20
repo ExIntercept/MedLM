@@ -34,6 +34,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -202,14 +203,49 @@ def screen_markdown(report: dict, limit) -> str:
 # Stage 2: end-to-end across medical models
 # ---------------------------------------------------------------------------
 
+MEDQA_INSTRUCTION = "\n\nRespond with your reasoning and end with 'Answer: <letter>'."
+
+
+def _e2e_text(item: BenchItem) -> str:
+    """The user message for both conditions (MedQA asks for a parseable answer in both)."""
+    return item.prompt + (MEDQA_INSTRUCTION if item.suite == "medqa" else "")
+
+
 def _undefended_prompt(item: BenchItem) -> list[dict]:
-    text = item.prompt
-    if item.suite == "medqa":
-        text += "\n\nRespond with your reasoning and end with 'Answer: <letter>'."
-    return [{"role": "user", "content": text}]
+    return [{"role": "user", "content": _e2e_text(item)}]
 
 
-def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool) -> dict:
+def _slug(text: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def served_models(base_url: str, api_key: str = "") -> Optional[set]:
+    """Model ids the endpoint is serving now, or None if it cannot be reached."""
+    import requests
+
+    url = base_url.rstrip("/")
+    url = url if url.endswith("/v1") else url + "/v1"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    headers["ngrok-skip-browser-warning"] = "1"
+    try:
+        r = requests.get(f"{url}/models", headers=headers, timeout=15)
+        r.raise_for_status()
+        return {m["id"] for m in r.json().get("data", [])}
+    except Exception:
+        return None
+
+
+def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
+            seed: int = 13, limit=None) -> dict:
+    """Undefended vs defended for every model in ``models``.
+
+    Rows are checkpointed per model, so the models can be served one at a time
+    (e.g. swapped in a single Colab GPU behind one tunnel): each invocation runs
+    whichever configured model the endpoint is serving, reuses finished
+    checkpoints for the others, and writes the combined report.
+    """
     retriever = None
     if use_rag:
         from src.retrieval.retriever import retrieve_context
@@ -218,41 +254,70 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool) ->
 
     report = {"stage": "e2e", "judge": judge.name, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
               "models": []}
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    wanted = {(i.id) for i in items}
     for spec in models:
         key = os.environ.get(spec.get("api_key_env", ""), "") if spec.get("api_key_env") else ""
+        spec = {**spec, "base_url": os.path.expandvars(spec["base_url"])}  # allow "${COLAB_API_BASE}"
         adapter = for_medical_model(spec["model"], spec["base_url"], spec.get("provider", "completions"), key)
-        gateway = ClinicalDefenseGateway(adapter, retriever=retriever, log_decisions=False)
-        print(f"\n=== {spec['model']} [{adapter.profile.family}] ===", flush=True)
-        rows = []
-        for n, item in enumerate(items, 1):
-            for condition in ("undefended", "defended"):
-                row = {"id": item.id, "suite": item.suite, "kind": item.kind, "condition": condition}
+        max_tokens = int(spec.get("max_tokens", 512))
+        ckpt = CHECKPOINT_DIR / (f"e2e_{_slug(spec['model'])}_{_slug(judge.name)}"
+                                 f"_rag{int(use_rag)}_seed{seed}_limit{limit}.jsonl")
+        done: dict = {}
+        if ckpt.exists():
+            for line in ckpt.read_text(encoding="utf-8").splitlines():
                 try:
-                    if condition == "undefended":
-                        resp = "".join(adapter.stream(_undefended_prompt(item), max_tokens=384)).strip()
-                        status = "RAW"
-                    else:
-                        res = gateway.run(item.prompt, mode=_mode(item))
-                        resp, status = res.response_text, res.status + ("/WITHHELD" if res.withheld else "")
-                except LLMUnavailable as exc:
-                    row.update(status="ERROR", error=str(exc)[:200])
-                    rows.append(row)
+                    r = json.loads(line)
+                    done[(r["id"], r["condition"])] = r
+                except (json.JSONDecodeError, KeyError):
                     continue
-                stopped = status.split("/")[0] in STOPPED or status.endswith("WITHHELD")
-                verdict = judge.judge(item.prompt, resp) if not stopped else None
-                row.update(
-                    status=status, stopped=stopped,
-                    refused=True if stopped else verdict.refused,
-                    harmful=False if stopped else verdict.harmful,
-                    response_excerpt=resp[:300],
-                )
-                if item.suite == "medqa":
-                    row["correct"] = extract_choice(resp) == item.reference.get("answer")
-                rows.append(row)
-            if n % 10 == 0:
-                print(f"  {n}/{len(items)}", flush=True)
+        missing = [(i, c) for i in items for c in ("undefended", "defended") if (i.id, c) not in done]
+        print(f"\n=== {spec['model']} [{adapter.profile.family}] "
+              f"{len(done)} rows checkpointed, {len(missing)} to run ===", flush=True)
+
+        if missing:
+            served = served_models(spec["base_url"], key)
+            if served is None or spec["model"] not in served:
+                state = "unreachable" if served is None else f"serving {sorted(served)}"
+                print(f"  skipped: endpoint {state}; serve {spec['model']} and re-run.", flush=True)
+            else:
+                gateway = ClinicalDefenseGateway(adapter, retriever=retriever, log_decisions=False,
+                                                 max_tokens=max_tokens)
+                fh = open(ckpt, "a", encoding="utf-8")
+                for n, (item, condition) in enumerate(missing, 1):
+                    row = {"id": item.id, "suite": item.suite, "kind": item.kind, "condition": condition}
+                    try:
+                        if condition == "undefended":
+                            resp = "".join(adapter.stream(_undefended_prompt(item), max_tokens=max_tokens)).strip()
+                            status = "RAW"
+                        else:
+                            res = gateway.run(_e2e_text(item), mode=_mode(item))
+                            resp, status = res.response_text, res.status + ("/WITHHELD" if res.withheld else "")
+                        stopped = status.split("/")[0] in STOPPED or status.endswith("WITHHELD")
+                        verdict = judge.judge(item.prompt, resp) if not stopped else None
+                    except LLMUnavailable as exc:
+                        print(f"  error on {item.id} ({condition}): {str(exc)[:120]}", flush=True)
+                        continue  # not checkpointed, retried on the next run
+                    row.update(
+                        status=status, stopped=stopped,
+                        refused=True if stopped else verdict.refused,
+                        harmful=False if stopped else verdict.harmful,
+                        response=resp[:2000],
+                    )
+                    if item.suite == "medqa":
+                        row["correct"] = extract_choice(resp) == item.reference.get("answer")
+                    done[(item.id, condition)] = row
+                    fh.write(json.dumps(row) + "\n")
+                    fh.flush()
+                    if n % 20 == 0:
+                        print(f"  {n}/{len(missing)}", flush=True)
+                fh.close()
+
+        rows = [r for (iid, _c), r in done.items() if iid in wanted]
+        complete = len(rows) == 2 * len(items)
         report["models"].append({"model": spec["model"], "family": adapter.profile.family,
-                                 "summary": summarise_e2e(rows), "rows": rows})
+                                 "template": adapter.profile.template, "complete": complete,
+                                 "n_rows": len(rows), "summary": summarise_e2e(rows), "rows": rows})
     return report
 
 
@@ -285,7 +350,11 @@ def e2e_markdown(report: dict) -> str:
         "",
     ]
     for m in report["models"]:
-        lines += [f"## {m['model']} ({m['family']})", "",
+        if not m["rows"]:
+            lines += [f"## {m['model']} ({m['family']})", "", "_Not run yet._", ""]
+            continue
+        status = "" if m.get("complete", True) else f" - partial, {m['n_rows']} responses so far"
+        lines += [f"## {m['model']} ({m['family']}, `{m.get('template', '?')}` template){status}", "",
                   "| Suite | Metric | Undefended | Defended |", "|---|---|---|---|"]
         for suite, conds in m["summary"].items():
             u, d = conds.get("undefended", {}), conds.get("defended", {})
@@ -331,13 +400,18 @@ def main():
         if not args.config:
             ap.error("e2e needs --config")
         models = json.loads(args.config.read_text(encoding="utf-8"))
+        unset = sorted({m["base_url"] for m in models if "$" in os.path.expandvars(m["base_url"])})
+        if unset:
+            ap.error(f"model base_url {unset} not set; add it to .env (see colab/ notebook)")
         if args.judge_config:
             jc = json.loads(args.judge_config.read_text(encoding="utf-8"))
-            judge = LlamaGuardJudge(OpenAIChatAdapter(jc["base_url"], jc["model"],
+            if "$" in os.path.expandvars(jc["base_url"]):
+                ap.error(f"judge base_url {jc['base_url']} is not set; add it to .env (see colab/ notebook)")
+            judge = LlamaGuardJudge(OpenAIChatAdapter(os.path.expandvars(jc["base_url"]), jc["model"],
                                                       os.environ.get(jc.get("api_key_env", ""), "")))
         else:
             judge = HeuristicJudge()
-        report = run_e2e(items, models, judge, use_rag=not args.no_rag)
+        report = run_e2e(items, models, judge, use_rag=not args.no_rag, seed=args.seed, limit=limit)
         md = e2e_markdown(report)
         stem = "benchmark_suite_e2e"
 

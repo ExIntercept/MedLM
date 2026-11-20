@@ -1,0 +1,1 @@
+{"model": "meta-llama/Llama-Guard-3-1B", "base_url": "${COLAB_JUDGE_BASE}", "provider": "openai_chat", "api_key_env": "COLAB_API_KEY"}
