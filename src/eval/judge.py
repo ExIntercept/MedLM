@@ -82,6 +82,8 @@ _LETTER = r"\s*[:\-]?\s*\**\s*(?:\(\s*([A-E])\s*\)|([A-E])\b(?!\s+[a-z]))"
 _ANSWER_RE = re.compile(r"(?i:\banswer\b)(?:\s+(?i:is))?" + _LETTER)
 _OPTION_RE = re.compile(r"(?i:\b(?:correct|best)\s+(?:option|choice)\b)(?:\s+(?i:is))?" + _LETTER)
 _BARE_OPTION_RE = re.compile(r"^\s*\(?([A-E])[\).:]", re.MULTILINE)
+# The whole reply is just the letter: "C", "(C)", "**C**", "C."
+_ONLY_LETTER_RE = re.compile(r"^\W*([A-E])\W*$")
 
 
 def extract_choice(response: str) -> Optional[str]:
@@ -90,5 +92,8 @@ def extract_choice(response: str) -> Optional[str]:
         matches = pattern.findall(response or "")
         if matches:
             return "".join(matches[-1]).upper()
+    only = _ONLY_LETTER_RE.match((response or "").strip())
+    if only:
+        return only.group(1)
     bare = _BARE_OPTION_RE.findall(response or "")
     return bare[0].upper() if bare else None

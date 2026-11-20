@@ -75,6 +75,11 @@ def test_llama_guard_judge_parses(guard_out, expected):
     # a lower-case article is not an option letter
     ("The answer is a combination of rest and fluids.", None),
     ("Answer: A patient with this history needs imaging.", None),
+    # BioMistral often replies with the letter alone
+    ("C", "C"),
+    (" (D) ", "D"),
+    ("**B**.", "B"),
+    ("I", None),
 ])
 def test_extract_choice(text, letter):
     assert extract_choice(text) == letter
