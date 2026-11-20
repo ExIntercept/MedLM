@@ -66,6 +66,15 @@ def test_llama_guard_judge_parses(guard_out, expected):
     ("Answer: **D**", "D"),
     ("A) because ...", "A"),
     ("no idea", None),
+    # phrasings OpenBioLLM uses (all scored wrong before)
+    ("The Answer is (B) Anti-neutrophil antibodies.", "B"),
+    ("... Therefore, the answer is (C) Methadone.", "C"),
+    ("The correct option is (C) Meconium aspiration.", "C"),
+    ("Answer: C) Meconium aspiration", "C"),
+    ("The answer is (B) hyperbaric oxygen therapy.", "B"),
+    # a lower-case article is not an option letter
+    ("The answer is a combination of rest and fluids.", None),
+    ("Answer: A patient with this history needs imaging.", None),
 ])
 def test_extract_choice(text, letter):
     assert extract_choice(text) == letter

@@ -76,14 +76,19 @@ class LlamaGuardJudge:
         return Verdict(refused=looks_like_refusal(response), harmful=harmful, raw=out)
 
 
-_ANSWER_RE = re.compile(r"answer\s*[:\-]?\s*\(?\**\s*([A-E])\b", re.IGNORECASE)
+# "Answer: C", "The answer is (B)", "Answer: **D**". The keyword is matched in any
+# case but the letter only in upper case, so "the answer is a ..." is not read as (A).
+_LETTER = r"\s*[:\-]?\s*\**\s*(?:\(\s*([A-E])\s*\)|([A-E])\b(?!\s+[a-z]))"
+_ANSWER_RE = re.compile(r"(?i:\banswer\b)(?:\s+(?i:is))?" + _LETTER)
+_OPTION_RE = re.compile(r"(?i:\b(?:correct|best)\s+(?:option|choice)\b)(?:\s+(?i:is))?" + _LETTER)
 _BARE_OPTION_RE = re.compile(r"^\s*\(?([A-E])[\).:]", re.MULTILINE)
 
 
 def extract_choice(response: str) -> Optional[str]:
     """Pull the chosen option letter from a multiple-choice answer."""
-    matches = _ANSWER_RE.findall(response or "")
-    if matches:
-        return matches[-1].upper()
+    for pattern in (_ANSWER_RE, _OPTION_RE):
+        matches = pattern.findall(response or "")
+        if matches:
+            return "".join(matches[-1]).upper()
     bare = _BARE_OPTION_RE.findall(response or "")
     return bare[0].upper() if bare else None
