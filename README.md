@@ -236,7 +236,7 @@ This runs the adversarial and benign battery against each listed medical model t
 #### Running it on Colab (one GPU, models in turn)
 `colab/cross_model_eval_server.ipynb` serves one medical model at a time behind a fixed tunnel. Your laptop runs the gateway and the benchmark. The Llama Guard 3 1B judge is optional and comes last (cell 9), because Meta approves access to it by hand.
 
-1. In Colab, choose an A100 or L4 runtime if available and add the secrets `HF_TOKEN` and `NGROK_TOKEN`. The free T4 also works: the notebook then loads the 7–8B models in 4-bit (bitsandbytes) with a 4096-token context, so note that when reporting their results.
+1. In Colab, choose an A100 or L4 runtime if available and add the secret `HF_TOKEN` (the tunnel is a Cloudflare quick tunnel and needs no account). The free T4 also works: the notebook then loads the 7–8B models in 4-bit (bitsandbytes) with a 4096-token context, so note that when reporting their results.
 2. Run cells 1–5, then copy the printed `COLAB_API_BASE` and `COLAB_API_KEY` lines into `.env`.
 3. In cell 6, set `MODEL` and run the cell. When it prints *Ready*, run the command it prints on your laptop. With the judge running, that is:
    ```bash
