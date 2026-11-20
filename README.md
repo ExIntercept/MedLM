@@ -234,15 +234,20 @@ python scripts/run_cross_model_eval.py --config scripts/cross_model_config.examp
 This runs the adversarial and benign battery against each listed medical model twice: once **undefended** (raw model) and once **defended** (through the gateway). It writes `docs/CROSS_MODEL_EVAL_REPORT.md` with a per-model comparison. `--stub` runs the same pipeline with a fake model and needs no GPU.
 
 #### Running it on Colab (one GPU, models in turn)
-`colab/cross_model_eval_server.ipynb` serves one medical model at a time behind a fixed tunnel, with Llama Guard 3 1B running alongside as the judge. Your laptop runs the gateway and the benchmark.
+`colab/cross_model_eval_server.ipynb` serves one medical model at a time behind a fixed tunnel. Your laptop runs the gateway and the benchmark. The Llama Guard 3 1B judge is optional and comes last (cell 9), because Meta approves access to it by hand.
 
 1. In Colab, choose an A100 (or L4) runtime and add the secrets `HF_TOKEN` and `NGROK_TOKEN`.
-2. Run cells 1–6, then copy the printed `COLAB_API_BASE`, `COLAB_JUDGE_BASE` and `COLAB_API_KEY` lines into `.env`.
-3. In cell 7, set `MODEL` and run the cell. When it prints *Ready*, run on your laptop:
+2. Run cells 1–5, then copy the printed `COLAB_API_BASE` and `COLAB_API_KEY` lines into `.env`.
+3. In cell 6, set `MODEL` and run the cell. When it prints *Ready*, run the command it prints on your laptop. With the judge running, that is:
    ```bash
-   python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_colab.json        --judge-config scripts/judge_colab.json --limit 30        --suites medsafetybench medical_jailbreak jbb_harmful deepset_injection medqa medquad xstest_safe
+   python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_colab.json \
+       --judge-config scripts/judge_colab.json --limit 30 \
+       --suites medsafetybench medical_jailbreak jbb_harmful deepset_injection medqa medquad xstest_safe
    ```
-4. Change `MODEL` in cell 7, run it again, and re-run the same command.
+4. Change `MODEL` in cell 6, run it again, and re-run the same command.
+5. Once Llama Guard access is approved, run cell 9 and add the printed `COLAB_JUDGE_BASE` line to `.env`.
+   - Without the judge, a refusal-phrase heuristic is used, which does not measure harm.
+   - Results are kept separately per judge, so re-run any model you tested before the judge was up.
 
 How the runner handles the switching:
 - It tests only the model the endpoint is serving now.
