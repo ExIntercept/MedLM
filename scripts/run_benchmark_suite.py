@@ -271,7 +271,9 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                     done[(r["id"], r["condition"])] = r
                 except (json.JSONDecodeError, KeyError):
                     continue
-        missing = [(i, c) for i in items for c in ("undefended", "defended") if (i.id, c) not in done]
+        # Undefended first, then defended: on a single GPU that keeps the medical
+        # model loaded for the whole first half instead of swapping per prompt.
+        missing = [(i, c) for c in ("undefended", "defended") for i in items if (i.id, c) not in done]
         print(f"\n=== {spec['model']} [{adapter.profile.family}] "
               f"{len(done)} rows checkpointed, {len(missing)} to run ===", flush=True)
 
@@ -294,7 +296,9 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                             res = gateway.run(_e2e_text(item), mode=_mode(item))
                             resp, status = res.response_text, res.status + ("/WITHHELD" if res.withheld else "")
                         stopped = status.split("/")[0] in STOPPED or status.endswith("WITHHELD")
-                        verdict = judge.judge(item.prompt, resp) if not stopped else None
+                        # Judged in one pass below, so the judge model is not swapped
+                        # in for every generation.
+                        verdict = HeuristicJudge().judge(item.prompt, resp) if not stopped else None
                     except LLMUnavailable as exc:
                         print(f"  error on {item.id} ({condition}): {str(exc)[:120]}", flush=True)
                         continue  # not checkpointed, retried on the next run
@@ -313,12 +317,41 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                         print(f"  {n}/{len(missing)}", flush=True)
                 fh.close()
 
+        _judge_pass(done, judge, ckpt, items)
         rows = [r for (iid, _c), r in done.items() if iid in wanted]
         complete = len(rows) == 2 * len(items)
         report["models"].append({"model": spec["model"], "family": adapter.profile.family,
                                  "template": adapter.profile.template, "complete": complete,
                                  "n_rows": len(rows), "summary": summarise_e2e(rows), "rows": rows})
     return report
+
+
+def _judge_pass(done: dict, judge, ckpt: Path, items: list[BenchItem]) -> None:
+    """Score every answered row not yet scored by ``judge``; rewrite the checkpoint.
+
+    Stopped rows need no judge. Rows the judge cannot reach stay unscored and are
+    retried on the next run.
+    """
+    if isinstance(judge, HeuristicJudge):
+        return
+    prompts = {i.id: i.prompt for i in items}
+    todo = [r for (iid, _c), r in done.items()
+            if iid in prompts and not r["stopped"] and r.get("judged_by") != judge.name]
+    if not todo:
+        return
+    print(f"  judging {len(todo)} responses with {judge.name}", flush=True)
+    for n, row in enumerate(todo, 1):
+        try:
+            v = judge.judge(prompts[row["id"]], row["response"])
+        except LLMUnavailable as exc:
+            print(f"  judge error on {row['id']}: {str(exc)[:120]}", flush=True)
+            continue
+        row.update(refused=v.refused, harmful=v.harmful, judged_by=judge.name)
+        if n % 50 == 0:
+            print(f"  judged {n}/{len(todo)}", flush=True)
+    tmp = ckpt.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in done.values()), encoding="utf-8")
+    tmp.replace(ckpt)
 
 
 def summarise_e2e(rows: list[dict]) -> dict:

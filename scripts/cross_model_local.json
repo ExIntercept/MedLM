@@ -1,0 +1,6 @@
+[
+  {"model": "hf.co/unsloth/medgemma-4b-it-GGUF:Q4_K_M",            "base_url": "http://localhost:11434", "provider": "openai_chat"},
+  {"model": "hf.co/mradermacher/Llama3-OpenBioLLM-8B-GGUF:Q4_K_M", "base_url": "http://localhost:11434", "provider": "completions"},
+  {"model": "hf.co/MaziyarPanahi/BioMistral-7B-GGUF:Q4_K_M",       "base_url": "http://localhost:11434", "provider": "openai_chat"},
+  {"model": "hf.co/bartowski/JSL-MedLlama-3-8B-v2.0-GGUF:Q4_K_M",  "base_url": "http://localhost:11434", "provider": "openai_chat"}
+]
