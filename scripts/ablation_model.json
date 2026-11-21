@@ -1,0 +1,7 @@
+[
+ {
+  "model": "hf.co/unsloth/medgemma-4b-it-GGUF:Q4_K_M",
+  "base_url": "http://localhost:11434",
+  "provider": "openai_chat"
+ }
+]

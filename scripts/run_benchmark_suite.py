@@ -248,7 +248,8 @@ def _run_suffix(temperature: float, tag: str) -> str:
 
 def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
             seed: int = 13, limit=None, temperature: float = LEGACY_TEMPERATURE,
-            toggles: dict | None = None, tag: str = "") -> dict:
+            toggles: dict | None = None, tag: str = "",
+            conditions: tuple = ("undefended", "defended")) -> dict:
     """Undefended vs defended for every model in ``models``.
 
     Rows are checkpointed per model, so the models can be served one at a time
@@ -258,7 +259,8 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
 
     ``temperature`` 0 with the sampling ``seed`` sent to the model makes reruns
     give the same answers. ``toggles`` switches gateway layers off for ablations,
-    and ``tag`` keeps such a run's checkpoints apart.
+    and ``tag`` keeps such a run's checkpoints apart. ``conditions`` limits a run
+    to one side (an ablation needs only ``("defended",)``).
     """
     retriever = None
     if use_rag:
@@ -288,7 +290,7 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                     continue
         # Undefended first, then defended: on a single GPU that keeps the medical
         # model loaded for the whole first half instead of swapping per prompt.
-        missing = [(i, c) for c in ("undefended", "defended") for i in items if (i.id, c) not in done]
+        missing = [(i, c) for c in conditions for i in items if (i.id, c) not in done]
         print(f"\n=== {spec['model']} [{adapter.profile.family}] "
               f"{len(done)} rows checkpointed, {len(missing)} to run ===", flush=True)
 
@@ -336,8 +338,8 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                 fh.close()
 
         _judge_pass(done, judge, ckpt, items)
-        rows = [r for (iid, _c), r in done.items() if iid in wanted]
-        complete = len(rows) == 2 * len(items)
+        rows = [r for (iid, c), r in done.items() if iid in wanted and c in conditions]
+        complete = len(rows) == len(conditions) * len(items)
         report["models"].append({"model": spec["model"], "family": adapter.profile.family,
                                  "template": adapter.profile.template, "complete": complete,
                                  "n_rows": len(rows), "summary": summarise_e2e(rows), "rows": rows})
@@ -509,10 +511,23 @@ def main():
     ap.add_argument("--disable", nargs="+", default=[], choices=sorted(DEFAULT_TOGGLES),
                     help="e2e: gateway layers to switch off (ablation)")
     ap.add_argument("--tag", default="", help="e2e: name kept in checkpoint files (e.g. an ablation)")
+    ap.add_argument("--subset", type=int, default=None,
+                    help="use only the first N prompts per suite of the --limit sample (so an ablation "
+                         "reuses prompts of a larger main run)")
+    ap.add_argument("--conditions", nargs="+", default=["undefended", "defended"],
+                    choices=["undefended", "defended"])
     args = ap.parse_args()
 
     limit = args.limit if args.limit is not None else (200 if args.stage == "screen" else 25)
     items = load_suites(args.suites, limit=limit, seed=args.seed)
+    if args.subset:
+        per_suite = defaultdict(int)
+        kept = []
+        for i in items:
+            per_suite[i.suite] += 1
+            if per_suite[i.suite] <= args.subset:
+                kept.append(i)
+        items = kept
     print(f"Loaded {len(items)} prompts from {len(args.suites)} suites (limit {limit}/suite).", flush=True)
     args.out.mkdir(exist_ok=True)
 
@@ -537,7 +552,8 @@ def main():
             judge = HeuristicJudge()
         report = run_e2e(items, models, judge, use_rag=not args.no_rag, seed=args.seed, limit=limit,
                          temperature=args.temperature, toggles={k: False for k in args.disable},
-                         tag=args.tag or ("no-" + "-".join(args.disable) if args.disable else ""))
+                         tag=args.tag or ("no-" + "-".join(args.disable) if args.disable else ""),
+                         conditions=tuple(args.conditions))
         md = e2e_markdown(report)
         stem = "benchmark_suite_e2e"
 

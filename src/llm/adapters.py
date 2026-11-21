@@ -128,6 +128,7 @@ class OpenAIChatAdapter:
         system_role: bool = True,
         profile: Optional["ModelProfile"] = None,
         seed: Optional[int] = None,
+        extra: Optional[dict] = None,
     ):
         if not base_url:
             raise LLMUnavailable("LLM_BASE_URL (or COLAB_API_BASE) is not set in .env.")
@@ -136,6 +137,7 @@ class OpenAIChatAdapter:
         self.api_key = api_key
         self.system_role = system_role
         self.seed = seed
+        self.extra = dict(extra or {})  # server-specific fields, e.g. {"reasoning_effort": "none"}
         self.name = f"openai_chat:{model}"
         self.profile = profile or resolve_profile(model)
 
@@ -151,6 +153,7 @@ class OpenAIChatAdapter:
         }
         if self.seed is not None:
             payload["seed"] = self.seed
+        payload.update(self.extra)
         response = _post_stream(f"{self.base_url}/v1/chat/completions", self.api_key, payload, self.name)
         try:
             for chunk in _iter_sse_json(response):

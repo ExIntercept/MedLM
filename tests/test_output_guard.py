@@ -97,3 +97,17 @@ def test_seed_is_sent_only_when_set(monkeypatch, provider):
         with pytest.raises(LLMUnavailable):
             list(a.stream([{"role": "user", "content": "hi"}], temperature=0.0))
     assert payloads[0]["seed"] == 13 and "seed" not in payloads[1]
+
+
+def test_extra_fields_are_sent(monkeypatch):
+    payloads = []
+
+    def fake_post(url, key, payload, name):
+        payloads.append(payload)
+        raise LLMUnavailable("stop here")
+
+    monkeypatch.setattr(adapters, "_post_stream", fake_post)
+    a = adapters.OpenAIChatAdapter("http://x", "qwen3:8b", "", extra={"reasoning_effort": "none"})
+    with pytest.raises(LLMUnavailable):
+        list(a.stream([{"role": "user", "content": "hi"}], temperature=0.0))
+    assert payloads[0]["reasoning_effort"] == "none"
