@@ -25,8 +25,15 @@ def _salient_terms(text):
     return {w.lower() for w in re.findall(r"\b[A-Za-z]{4,}\b", text) if w.lower() not in STOPWORDS}
 
 
-def verify_evidence(response_text, retrieved_evidence, vignette=""):
-    """Audits generated response sentences against retrieved evidence chunks."""
+def verify_evidence(response_text, retrieved_evidence, vignette="", options=None, pass_threshold=None):
+    """Audits generated response sentences against retrieved evidence chunks.
+
+    Args:
+        vignette:       The user's question; its terms count as grounded.
+        options:        Multiple-choice options ``{"A": "...", ...}`` stripped from
+                        the vignette; naming one is restating the question.
+        pass_threshold: Share of sentences that must be grounded (default PASS_THRESHOLD).
+    """
     if not retrieved_evidence:
         return {
             "status": "UNGROUNDED",
@@ -37,6 +44,7 @@ def verify_evidence(response_text, retrieved_evidence, vignette=""):
 
     reference_terms = _salient_terms(
         " ".join(text for _, text, _ in retrieved_evidence) + " " + vignette
+        + " " + " ".join((options or {}).values())
     )
 
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", response_text) if len(s.strip()) > 15]
@@ -56,7 +64,8 @@ def verify_evidence(response_text, retrieved_evidence, vignette=""):
 
     total = len(verified_claims) + len(flagged_claims)
     score = round(len(verified_claims) / total, 2) if total > 0 else 1.0
-    status = "PASS" if score >= PASS_THRESHOLD else "FLAGGED"
+    threshold = PASS_THRESHOLD if pass_threshold is None else pass_threshold
+    status = "PASS" if score >= threshold else "FLAGGED"
 
     return {
         "status": status,

@@ -276,7 +276,7 @@ def _build_hardened_parts(
     if tone == "usmle":
         opts_str = "\n".join([f"({k}) {v}" for k, v in sorted(detected_options.items())])
         persona = (
-            "You are an expert clinical physician taking the USMLE board examination.\n"
+            "You are an expert clinical physician answering a multiple-choice clinical vignette question.\n"
             "Analyze the clinical vignette using the retrieved guidelines and prior conversation context. "
             "Explain your diagnostic deduction step-by-step and conclude with the correct option."
         )
@@ -406,7 +406,7 @@ def _build_compact_parts(
     comes last with no "Provide your response:" cue for the model to echo.
     """
     if tone == "usmle":
-        persona = ("You are a physician answering a USMLE question. Reason briefly from the reference "
+        persona = ("You are a physician answering a multiple-choice clinical question. Reason briefly from the reference "
                    "material, then give the single best option.")
     elif tone == "patient":
         persona = ("You are a careful medical assistant, not a doctor. Answer the question directly and "
@@ -457,7 +457,7 @@ def _build_legacy_prompt(
     """
     if tone == "usmle":
         opts_str = "\n".join([f"({k}) {v}" for k, v in sorted(detected_options.items())])
-        raw_prompt = f"""You are an expert clinical physician taking the USMLE board examination.
+        raw_prompt = f"""You are an expert clinical physician answering a multiple-choice clinical vignette question.
 Analyze the clinical vignette using the retrieved guidelines and prior conversation context. Explain your diagnostic deduction step-by-step and conclude with the correct option.
 
 ### Previous Case History

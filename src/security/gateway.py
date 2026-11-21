@@ -94,6 +94,11 @@ class GatewayResult:
     withheld: bool = False
     """True when the model's answer was replaced by WITHHELD_MESSAGE."""
 
+    draft_text: str = ""
+    """The model's cleaned answer before the evidence gate. For evaluation and
+    tuning only: when ``withheld`` is True it failed verification and must never
+    be shown to the user or persisted."""
+
     model: Optional[str] = None
     """Name of the adapter that generated the answer, if any."""
 
@@ -376,7 +381,9 @@ class ClinicalDefenseGateway:
 
         trace.append("verify")
         answer = sanitize_patient_output(clean_model_output(raw_answer, model_profile))
-        audit = verify_evidence(answer, evidence, vignette_text)
+        # Options were split off the vignette; naming one restates the question.
+        audit = verify_evidence(answer, evidence, vignette_text, options=detected_options)
+        draft_text = answer
         withheld = audit["status"] == "FLAGGED"
         if withheld:
             answer = WITHHELD_MESSAGE
@@ -391,6 +398,7 @@ class ClinicalDefenseGateway:
             audit=audit,
             sources=sources,
             withheld=withheld,
+            draft_text=draft_text,
             model=getattr(self.llm, "name", type(self.llm).__name__),
             trace=trace,
             meta={
