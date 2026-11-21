@@ -7,11 +7,12 @@ reached through an :class:`~src.llm.adapters.LLMAdapter`:
     1. sanitize   - strip invisible chars, defang every model family's control tokens
     2. triage     - deterministic emergency red-flag escalation
     3. guardrails - hard-coded contraindication intercepts
-    4. detect     - Prompt Guard + Template Matcher -> ALLOW / FLAG / BLOCK
+    4. detect     - Layers A, B, H, G (Llama Guard on the input) -> ALLOW / FLAG / BLOCK
     5. retrieve   - optional evidence retrieval (injected callable)
     6. harden     - nonce-tagged system/user messages (no model-specific markers)
     7. generate   - adapter.stream(...)  <- the only model-specific step
     8. verify     - output clean-up + evidence audit; unverifiable answers withheld
+    9. output     - Llama Guard on the answer; unsafe answers replaced
 
 The gateway is transport-free: it reports progress through an ``on_event``
 callback and returns a :class:`GatewayResult`. The FastAPI server turns those
@@ -54,6 +55,13 @@ WITHHELD_MESSAGE = (
     "professional for individualized advice."
 )
 
+# Shown when the output guard judges the model's answer unsafe.
+OUTPUT_BLOCKED_MESSAGE = (
+    "I can't share this response because it may be unsafe. If you have a clinical question, "
+    "I can help with evidence-based, safe information. If someone is in immediate danger, "
+    "contact your local emergency number."
+)
+
 DEFAULT_TOGGLES: dict[str, bool] = {
     "defense_enabled": True,
     "layer_sanitize": True,
@@ -64,6 +72,7 @@ DEFAULT_TOGGLES: dict[str, bool] = {
     "layer_harm_classifier": True,
     "layer_llama_guard": True,
     "layer_prompt_hardening": True,
+    "layer_output_guard": True,
 }
 
 Evidence = list  # list[tuple[chunk_id, text, meta]]
@@ -98,6 +107,10 @@ class GatewayResult:
     """The model's cleaned answer before the evidence gate. For evaluation and
     tuning only: when ``withheld`` is True it failed verification and must never
     be shown to the user or persisted."""
+
+    output_blocked: bool = False
+    """True when the output guard judged the answer unsafe and replaced it with
+    OUTPUT_BLOCKED_MESSAGE."""
 
     model: Optional[str] = None
     """Name of the adapter that generated the answer, if any."""
@@ -388,6 +401,19 @@ class ClinicalDefenseGateway:
         if withheld:
             answer = WITHHELD_MESSAGE
             emit("verification_status", {"status": "FLAGGED"})
+
+        # ── 9. Output guard: grounding measures evidence support, not harm.
+        # An answer that reuses the question's own words can be fully
+        # "grounded" and still unsafe, so Llama Guard also judges the answer.
+        output_guard = None
+        if not withheld and self._on("defense_enabled") and self._on("layer_output_guard"):
+            output_guard = _check_output(user_text, answer)
+            if output_guard is not None:
+                trace.append("output_guard")
+                if output_guard.blocks:
+                    answer = OUTPUT_BLOCKED_MESSAGE
+                    emit("security_status", {"action": "BLOCK", "category": "UNSAFE_OUTPUT"})
+        output_blocked = bool(output_guard is not None and output_guard.blocks)
         emit("token", answer)
 
         return GatewayResult(
@@ -399,11 +425,15 @@ class ClinicalDefenseGateway:
             sources=sources,
             withheld=withheld,
             draft_text=draft_text,
+            output_blocked=output_blocked,
             model=getattr(self.llm, "name", type(self.llm).__name__),
             trace=trace,
             meta={
                 "faithfulness_score": audit["score"],
                 "status": audit["status"],
+                "output_guard": None if output_guard is None else {
+                    "unsafe": output_guard.unsafe, "categories": output_guard.categories,
+                    "blocked": output_blocked, "ms": output_guard.latency_ms},
                 "model": getattr(self.llm, "name", type(self.llm).__name__),
                 "model_family": model_profile.family if model_profile else None,
                 "context_fit": fit_notes,
@@ -420,6 +450,24 @@ class ClinicalDefenseGateway:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _check_output(user_text: str, answer: str):
+    """Llama Guard verdict on the answer, or None when the guard is off or fails.
+
+    Like the input layers, an unreachable guard is bypassed rather than failing
+    the request; the result's meta records that no verdict was made.
+    """
+    from src.security.llama_guard import get_input_guard
+
+    guard = get_input_guard()
+    if guard is None:
+        return None
+    try:
+        return guard.classify_response(user_text, answer)
+    except Exception as exc:  # noqa: BLE001 - any guard failure means bypass
+        logger.warning("Output guard unavailable, bypassed: %s", exc)
+        return None
+
 
 def _format_evidence(evidence: Evidence) -> str:
     out = ""

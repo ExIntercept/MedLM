@@ -237,14 +237,28 @@ def served_models(base_url: str, api_key: str = "") -> Optional[set]:
         return None
 
 
+LEGACY_TEMPERATURE = 0.2
+"""Sampling temperature of the first runs; their checkpoints carry no suffix."""
+
+
+def _run_suffix(temperature: float, tag: str) -> str:
+    out = "" if temperature == LEGACY_TEMPERATURE else f"_temp{temperature:g}"
+    return out + (f"_{_slug(tag)}" if tag else "")
+
+
 def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
-            seed: int = 13, limit=None) -> dict:
+            seed: int = 13, limit=None, temperature: float = LEGACY_TEMPERATURE,
+            toggles: dict | None = None, tag: str = "") -> dict:
     """Undefended vs defended for every model in ``models``.
 
     Rows are checkpointed per model, so the models can be served one at a time
     (e.g. swapped in a single Colab GPU behind one tunnel): each invocation runs
     whichever configured model the endpoint is serving, reuses finished
     checkpoints for the others, and writes the combined report.
+
+    ``temperature`` 0 with the sampling ``seed`` sent to the model makes reruns
+    give the same answers. ``toggles`` switches gateway layers off for ablations,
+    and ``tag`` keeps such a run's checkpoints apart.
     """
     retriever = None
     if use_rag:
@@ -259,10 +273,11 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
     for spec in models:
         key = os.environ.get(spec.get("api_key_env", ""), "") if spec.get("api_key_env") else ""
         spec = {**spec, "base_url": os.path.expandvars(spec["base_url"])}  # allow "${COLAB_API_BASE}"
-        adapter = for_medical_model(spec["model"], spec["base_url"], spec.get("provider", "completions"), key)
+        adapter = for_medical_model(spec["model"], spec["base_url"], spec.get("provider", "completions"), key,
+                                    seed=None if temperature == LEGACY_TEMPERATURE else seed)
         max_tokens = int(spec.get("max_tokens", 512))
         ckpt = CHECKPOINT_DIR / (f"e2e_{_slug(spec['model'])}_{_slug(judge.name)}"
-                                 f"_rag{int(use_rag)}_seed{seed}_limit{limit}.jsonl")
+                                 f"_rag{int(use_rag)}_seed{seed}_limit{limit}{_run_suffix(temperature, tag)}.jsonl")
         done: dict = {}
         if ckpt.exists():
             for line in ckpt.read_text(encoding="utf-8").splitlines():
@@ -284,18 +299,21 @@ def run_e2e(items: list[BenchItem], models: list[dict], judge, use_rag: bool,
                 print(f"  skipped: endpoint {state}; serve {spec['model']} and re-run.", flush=True)
             else:
                 gateway = ClinicalDefenseGateway(adapter, retriever=retriever, log_decisions=False,
-                                                 max_tokens=max_tokens)
+                                                 max_tokens=max_tokens, temperature=temperature,
+                                                 toggles={**DEFAULT_TOGGLES, **(toggles or {})})
                 fh = open(ckpt, "a", encoding="utf-8")
                 for n, (item, condition) in enumerate(missing, 1):
                     row = {"id": item.id, "suite": item.suite, "kind": item.kind, "condition": condition}
                     try:
                         if condition == "undefended":
-                            resp = "".join(adapter.stream(_undefended_prompt(item), max_tokens=max_tokens)).strip()
+                            resp = "".join(adapter.stream(_undefended_prompt(item), temperature=temperature,
+                                                         max_tokens=max_tokens)).strip()
                             status = "RAW"
                         else:
                             res = gateway.run(_e2e_text(item), mode=_mode(item))
-                            resp, status = res.response_text, res.status + ("/WITHHELD" if res.withheld else "")
-                        stopped = status.split("/")[0] in STOPPED or status.endswith("WITHHELD")
+                            resp, status = res.response_text, res.status + (
+                                "/WITHHELD" if res.withheld else "/OUTPUT_BLOCKED" if res.output_blocked else "")
+                        stopped = status.split("/")[0] in STOPPED or status.endswith(("WITHHELD", "OUTPUT_BLOCKED"))
                         # Judged in one pass below, so the judge model is not swapped
                         # in for every generation.
                         verdict = HeuristicJudge().judge(item.prompt, resp) if not stopped else None
@@ -381,6 +399,8 @@ def refusal_cause(row: dict) -> str:
     status = row.get("status", "")
     if status.endswith("WITHHELD"):
         return "grounding check withheld"
+    if status.endswith("OUTPUT_BLOCKED"):
+        return "output guard blocked"
     if status.startswith("BLOCKED"):
         return "detector blocked"
     if status.startswith("EMERGENCY"):
@@ -421,12 +441,14 @@ def _overview_markdown(report: dict, harm: bool) -> list:
                 counts[group][refusal_cause(r)] += 1
         causes_by_model.append((m["family"], counts))
     lines += ["", "Why defended harmless prompts were refused (counts):", "",
-              "| Model | Prompts | Grounding check withheld | Detector blocked | Model declined | Emergency triage |",
-              "|---|---|---|---|---|---|"]
+              "| Model | Prompts | Grounding check withheld | Output guard blocked | Detector blocked "
+              "| Model declined | Emergency triage |",
+              "|---|---|---|---|---|---|---|"]
     for fam, counts in causes_by_model:
         for group in ("medical", "general"):
             c = counts.get(group, {})
             lines.append(f"| {fam} | {group} | {c.get('grounding check withheld', 0)} | "
+                         f"{c.get('output guard blocked', 0)} | "
                          f"{c.get('detector blocked', 0)} | {c.get('model declined', 0)} | "
                          f"{c.get('emergency triage', 0)} |")
     lines += ["", "Medical benign = MedQA + MedQuAD. General benign = JBB benign, deepset benign, "
@@ -481,6 +503,12 @@ def main():
     ap.add_argument("--judge-config", type=Path, help="e2e: JSON for a Llama Guard endpoint")
     ap.add_argument("--no-rag", action="store_true")
     ap.add_argument("--out", type=Path, default=ROOT / "docs")
+    ap.add_argument("--temperature", type=float, default=0.0,
+                    help="e2e: sampling temperature; 0 (with --seed sent to the model) is repeatable. "
+                         "0.2 reads the first, unseeded runs' checkpoints")
+    ap.add_argument("--disable", nargs="+", default=[], choices=sorted(DEFAULT_TOGGLES),
+                    help="e2e: gateway layers to switch off (ablation)")
+    ap.add_argument("--tag", default="", help="e2e: name kept in checkpoint files (e.g. an ablation)")
     args = ap.parse_args()
 
     limit = args.limit if args.limit is not None else (200 if args.stage == "screen" else 25)
@@ -507,7 +535,9 @@ def main():
                                                       os.environ.get(jc.get("api_key_env", ""), "")))
         else:
             judge = HeuristicJudge()
-        report = run_e2e(items, models, judge, use_rag=not args.no_rag, seed=args.seed, limit=limit)
+        report = run_e2e(items, models, judge, use_rag=not args.no_rag, seed=args.seed, limit=limit,
+                         temperature=args.temperature, toggles={k: False for k in args.disable},
+                         tag=args.tag or ("no-" + "-".join(args.disable) if args.disable else ""))
         md = e2e_markdown(report)
         stem = "benchmark_suite_e2e"
 

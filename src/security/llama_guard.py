@@ -36,6 +36,10 @@ CATEGORIES = {
 # triage, which routes self-harm to crisis support instead of refusing.
 NON_BLOCKING = {"S6", "S11"}
 
+# Keeps a user turn plus an answer well inside Llama Guard 3's context. Jailbreak
+# templates put the request last, so the user turn keeps its end.
+MAX_CONTEXT_CHARS = 12000
+
 
 @dataclass
 class GuardResult:
@@ -75,6 +79,20 @@ class InputGuard:
         start = time.perf_counter()
         out = "".join(self.adapter.stream([{"role": "user", "content": user_text}],
                                           temperature=0.0, max_tokens=20))
+        result = parse_guard_output(out)
+        result.latency_ms = round((time.perf_counter() - start) * 1000.0, 1)
+        return result
+
+    def classify_response(self, user_text: str, answer: str) -> GuardResult:
+        """Classify the model's answer in the context of the user's message.
+
+        With a user turn followed by an assistant turn, Llama Guard's chat
+        template asks whether the *assistant* turn is unsafe.
+        """
+        start = time.perf_counter()
+        messages = [{"role": "user", "content": user_text[-MAX_CONTEXT_CHARS:]},
+                    {"role": "assistant", "content": answer[:MAX_CONTEXT_CHARS]}]
+        out = "".join(self.adapter.stream(messages, temperature=0.0, max_tokens=20))
         result = parse_guard_output(out)
         result.latency_ms = round((time.perf_counter() - start) * 1000.0, 1)
         return result

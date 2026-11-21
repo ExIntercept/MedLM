@@ -127,6 +127,7 @@ class OpenAIChatAdapter:
         api_key: str = "",
         system_role: bool = True,
         profile: Optional["ModelProfile"] = None,
+        seed: Optional[int] = None,
     ):
         if not base_url:
             raise LLMUnavailable("LLM_BASE_URL (or COLAB_API_BASE) is not set in .env.")
@@ -134,6 +135,7 @@ class OpenAIChatAdapter:
         self.model = model
         self.api_key = api_key
         self.system_role = system_role
+        self.seed = seed
         self.name = f"openai_chat:{model}"
         self.profile = profile or resolve_profile(model)
 
@@ -147,6 +149,8 @@ class OpenAIChatAdapter:
             "top_p": 0.9,
             "stream": True,
         }
+        if self.seed is not None:
+            payload["seed"] = self.seed
         response = _post_stream(f"{self.base_url}/v1/chat/completions", self.api_key, payload, self.name)
         try:
             for chunk in _iter_sse_json(response):
@@ -239,12 +243,14 @@ class CompletionsAdapter:
         api_key: str = "",
         template: str = "gemma",
         profile: Optional["ModelProfile"] = None,
+        seed: Optional[int] = None,
     ):
         if not base_url:
             raise LLMUnavailable("LLM_BASE_URL (or COLAB_API_BASE) is not set in .env.")
         self.base_url = _normalise_base_url(base_url)
         self.model = model
         self.api_key = api_key
+        self.seed = seed
         self.template = _TEMPLATE_ALIASES.get(template, template)
         if self.template not in TEMPLATES:
             raise ValueError(f"Unknown LLM template {template!r}; choose from {sorted(TEMPLATES)}")
@@ -261,6 +267,8 @@ class CompletionsAdapter:
             "top_p": 0.9,
             "stream": True,
         }
+        if self.seed is not None:
+            payload["seed"] = self.seed
         stop = TEMPLATES[self.template][1]
         if stop:
             payload["stop"] = stop
@@ -318,6 +326,7 @@ def for_medical_model(
     provider: str = "completions",
     api_key: str = "",
     profile: Optional[ModelProfile] = None,
+    seed: Optional[int] = None,
 ) -> LLMAdapter:
     """Build an adapter for a medical model, configured from its profile.
 
@@ -326,12 +335,17 @@ def for_medical_model(
 
         for_medical_model("aaditya/Llama3-OpenBioLLM-8B", "http://localhost:8000")
         for_medical_model("BioMistral/BioMistral-7B", "http://localhost:8001", provider="openai_chat")
+
+    ``seed`` is sent with every request, so with temperature 0 the same prompt
+    gives the same answer (for benchmarks).
     """
     profile = profile or resolve_profile(model)
     if provider in ("openai_chat", "chat", "openai"):
-        return OpenAIChatAdapter(base_url, model, api_key, system_role=profile.system_role, profile=profile)
+        return OpenAIChatAdapter(base_url, model, api_key, system_role=profile.system_role, profile=profile,
+                                 seed=seed)
     if provider == "completions":
-        return CompletionsAdapter(base_url, model, api_key, template=profile.template, profile=profile)
+        return CompletionsAdapter(base_url, model, api_key, template=profile.template, profile=profile,
+                                 seed=seed)
     raise ValueError(f"Unknown provider {provider!r}; use 'completions' or 'openai_chat'.")
 
 
