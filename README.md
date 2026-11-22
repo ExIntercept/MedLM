@@ -162,7 +162,8 @@ Evaluates three distinct input contexts: (1) the current query, (2) the intake p
   - Blocks get a clinical refusal (`HARMFUL_REQUEST_MESSAGE`) that redirects to safe care or ethics channels.
 - **Layer G (Llama Guard input moderation)** — *File: `src/security/llama_guard.py`*:
   - Layer H was trained on harmful *clinical* requests. Plainly worded requests to hurt someone or to make a dangerous substance got past Layers A, B and H in UI testing. Llama Guard 3 is trained on exactly these hazard categories.
-  - Llama Guard classifies the multi-turn window through any OpenAI-compatible chat endpoint. Configure it with `GUARD_BASE_URL`, `GUARD_MODEL` and optionally `GUARD_API_KEY`; with Ollama, use `http://localhost:11434` and `llama-guard3:8b`. If these are unset, the layer is off.
+  - Llama Guard classifies the multi-turn window through any OpenAI-compatible chat endpoint. Configure it with `GUARD_BASE_URL`, `GUARD_MODEL` and optionally `GUARD_API_KEY`; with Ollama, use `http://localhost:11434` and `llama-guard3-agent:8b`. If these are unset, the layer is off.
+  - **Ollama template fix.** Ollama's stock `llama-guard3` template always asks about the last *user* message, even when the last turn is the model's answer, so answer checks (the output guard and the benchmark judge) silently rated the request instead. Build the fixed copy once with `ollama create llama-guard3-agent:8b -f scripts/ollama/llama-guard3-agent.Modelfile`. The gateway and the benchmark runner check this on start-up: with a broken template the runner stops and the gateway turns the output guard off and logs an error.
   - Two categories never block on their own:
     - **S6 "specialized advice"** fires on ordinary medical questions, which this product exists to answer.
     - **S11 "self-harm"** is left to emergency triage, which points the user to crisis support instead of refusing.
@@ -532,8 +533,9 @@ One consumer GPU is enough. The cross-model results below come from an RTX 4060 
    LLM_API_KEY=ollama
    LLM_MODEL=hf.co/unsloth/medgemma-4b-it-GGUF:Q4_K_M
    GUARD_BASE_URL=http://localhost:11434
-   GUARD_MODEL=llama-guard3:8b
+   GUARD_MODEL=llama-guard3-agent:8b
    ```
+   Build `llama-guard3-agent:8b` first (see Layer G above).
    `LLM_API_KEY` can be any value, because Ollama ignores it. OpenBioLLM's Ollama build has no chat template, so serve it with `LLM_PROVIDER=completions` and `LLM_TEMPLATE=llama3` instead.
 3. Start the server as in Step 3.
 4. To reproduce the cross-model benchmark:

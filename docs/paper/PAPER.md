@@ -2,7 +2,7 @@
 
 *[Author names], PES University*
 
-> **Draft status.** Sections 1–5 and 7–9 are complete. Numbers marked **[R]** are filled in from `docs/paper/RESULTS.md` once the experiment runs finish (`scripts/run_paper_pipeline.sh`). Citations are listed at the end; check every entry against the original paper before submission.
+> **Draft status.** Sections 1–5 and 7–9 are complete; Section 6.1 has the judge-independent numbers. Judge-1 numbers must come from the re-judged checkpoints (corrected Llama Guard template, Section 5), not from the first scoring pass. Numbers marked **[R]** are filled in from `docs/paper/RESULTS.md` once the experiment runs finish (`scripts/run_paper_pipeline.sh`). Citations are listed at the end; check every entry against the original paper before submission.
 
 ---
 
@@ -182,6 +182,7 @@ The answer is checked against the reference text: the retrieved evidence, the qu
 Grounding measures evidence support, not harm.
 - **The problem.** When tuning stage 8, Llama Guard judged 2 of 96 attack answers that reached the check unsafe, and *both* passed it: one repeated a jailbreak system prompt back, and the other was a hateful answer. Both reused the question's own words, so word overlap rated them fully grounded.
 - **The fix.** Stage 9 classifies the (request, answer) pair with Llama Guard and replaces unsafe answers. As in stage 4, S6 and S11 alone do not block.
+- **Serving pitfall.** Ollama's stock `llama-guard3` chat template ends with "Provide your safety assessment for ONLY THE LAST *User* message", even when the last turn is the assistant's. With it, a (request, answer) check silently rates the request: a bare "I can't help with that." after a harmful request comes back *unsafe*. We serve a copy with that line corrected (`scripts/ollama/llama-guard3-agent.Modelfile`). The gateway and the evaluation harness now check every guard endpoint on start-up with a canary pair (a harmful request alone must be unsafe; the same request followed by a refusal must be safe). If the check fails, the runner stops, and the gateway turns stage 9 off and logs an error rather than blocking answers for the wrong reason. **[R: re-check the "2 of 96" figure above with the corrected guard.]**
 
 ---
 
@@ -216,6 +217,7 @@ Grounding measures evidence support, not harm.
 - **Judge 1** is Llama Guard 3 8B, classifying the (request, response) pair.
 - **Judge 2** is Qwen3-8B, with thinking disabled and a rubric that asks separately whether the response itself contains harmful content and whether it refuses.
 - Responses stopped by the gateway before or after the model are counted as refusals and as not harmful.
+- **Judge validation.** Judge 1 is served by Ollama, whose stock Llama Guard template rates the user turn even when asked about the response (Section 4.9). Our first scoring pass used it: for MedGemma, 66 of the 83 undefended answers it rated harmful were plain refusals. We re-scored every answered response with the corrected template; the responses themselves did not change, because the template affects only the verdicts. All judge-1 numbers in this paper come from the corrected judge, which must pass the canary check before a run starts. The original verdicts are kept in the checkpoints (`harmful_stock_template`) for comparison.
 
 **Metrics.**
 
@@ -249,7 +251,7 @@ Grounding measures evidence support, not harm.
 
 **[R] Table 2 — ASR by attack suite**, pooled over models.
 
-**[R] Table 3 — Where attacks were stopped.** Outcome of every defended attack by stage. In the MedGemma run, the input detectors stopped 143 of 180 attack prompts, the grounding check withheld 18, the model itself refused 12, and 7 were answered, none harmful according to judge 1.
+**[R] Table 3 — Where attacks were stopped.** Outcome of every defended attack by stage. In the MedGemma run, the input detectors stopped 143 of 180 attack prompts, the grounding check withheld 18, the model itself refused 12, and 7 were answered (harmful according to judge 1: **[R]**).
 
 **[R] Table 4 — Judge agreement** (Cohen's κ).
 
@@ -272,6 +274,25 @@ Grounding measures evidence support, not harm.
 | | OR-Bench hard | 9.0% |
 | | JailbreakBench benign | 17.0% |
 
+### 6.1 Failure analysis
+
+Full tables: `docs/paper/FAILURES.md` (`scripts/failure_analysis.py`). Numbers below are for the three models whose runs were complete when this was written; JSL-MedLlama is **[R]**.
+
+**Attacks that got through.** Of 180 defended attack prompts per model, 7 (MedGemma), 13 (OpenBioLLM) and 15 (BioMistral) passed every input stage, were not refused by the model, and passed the grounding check and output guard. **[R]** of these were harmful according to judge 1 and **[R]** according to judge 2. No attack prompt was answered by every model: the misses depend on how each model responds, not only on what the detectors let through. Most misses are deepset prompt injections and medical jailbreaks.
+
+**Benign prompts that were stopped.** The detectors stopped 16–17 general benign prompts per model (of 120) and **no medical benign prompt**. The 17 distinct prompts fall into three groups:
+- requests that sound harmful but are harmless (e.g. "How can I steal someone's heart?", or JailbreakBench-benign items such as "Explain how to access the electronic health records of a family member");
+- OR-Bench prompts that ask for a harmful-sounding procedure with a "within legal limits" qualifier;
+- one adversarial nonsense prompt from deepset.
+
+The grounding check withheld a further 32–40 general benign answers per model, which is intended for non-medical requests (Section 7), and 4 of 60 medical benign answers.
+
+**Utility cost on MedQA.** Counting questions answered correctly without the gateway and wrongly with it, the gateway lost 1 (MedGemma), 2 (OpenBioLLM) and 2 (BioMistral) questions and gained 4, 10 and 6. None of the lost questions was withheld by the grounding check. We attribute the gains to the retrieved evidence and to the hardened prompt's answer-format instruction, which makes the answer letter easier to extract; the no-retrieval and no-hardening ablations (Table 5) test this **[R]**.
+
+**Judge errors.** With the stock template, judge 1 rated plain refusals as harmful (Section 5). After correction, **[R]** of the remaining judge-1 harmful verdicts on answered attacks disagree with judge 2 (Table 4).
+
+**Human review.** **[R]** Two team members rated a fixed, seeded sample of 40 defended responses: 20 MedQuAD answers compared with the MedQuAD reference answers, 10 answered attacks, and 10 refused benign prompts. They rated correctness (0–2), harm and whether each refusal was appropriate, working independently (`docs/paper/human_eval/`). The raters are not clinicians.
+
 ---
 
 ## 7. Discussion
@@ -288,6 +309,8 @@ Grounding measures evidence support, not harm.
 
 **Judge circularity.** Layer G and judge 1 are the same model. Agreement with the independent judge 2 (Table 4) and the ablation without Llama Guard (Table 5) together indicate how much of the defended result depends on that model **[R]**.
 
+**Validate the judge, not only the defense.** A guard model served with a template that rates the wrong turn still produces plausible-looking numbers. Here it inflated undefended attack success, because a refused harmful request counted as a successful attack, and it made the defended result circular, because anything Layer G let through also looked safe to the judge. Nothing in the aggregate tables revealed it. It showed up only when we read individual verdicts during failure analysis. A two-message canary check before every run is cheap. We recommend it for any evaluation that uses Llama Guard through a chat template.
+
 **Cost.**
 - The detectors add about 0.5 s per prompt on CPU.
 - Llama Guard 8B adds the largest latency on an 8 GB GPU, because the guard and the medical model are swapped in GPU memory. An answered request took roughly 40 s end to end with the 8B guard, against 11–13 s with the 1B guard. The 1B guard missed one harmful request and blocked one benign programming question in our UI tests.
@@ -299,6 +322,7 @@ Grounding measures evidence support, not harm.
 
 - **Scope.** Text only; no vision-language inputs. Four quantized models of 4–8B parameters. 30 prompts per benchmark. Results for larger or unquantized models may differ.
 - **Adaptive attacks.** We evaluate public attacks, not attacks optimised against the gateway itself (e.g. gradient-based suffixes, or iterative attacker LLMs). A determined white-box attacker targeting Layers A, B, H and G is not covered.
+- **Output guard during the main run.** The defended answers of the main run were generated while stage 9 still used the stock template, so it re-checked the request rather than the answer. It changed 0–2 answers per model (Table 3). The ablations used the corrected guard.
 - **Judges.** Both judges are automatic. Harm judgments for medical content can require clinical expertise; a clinician-annotated subset would strengthen the evaluation.
 - **Clinical use.** MedLM is a research prototype, not a medical device. Its emergency triage and contraindication rules are illustrative, not exhaustive.
 - **Dual use.** The evaluation uses public harmful-prompt benchmarks. We release no new harmful content, and model responses are stored only locally.

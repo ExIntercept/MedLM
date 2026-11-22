@@ -74,6 +74,25 @@ class InputGuard:
     def __init__(self, adapter):
         self.adapter = adapter
         self.name = getattr(adapter, "name", "guard")
+        self._response_ok: Optional[bool] = None  # checked once, on first use
+
+    def _check_response_mode(self) -> bool:
+        """True when the endpoint's template rates the assistant turn.
+
+        Ollama's stock llama-guard3 template rates the user turn even when asked
+        about the answer, which would turn the output guard into a second input
+        check. Use scripts/ollama/llama-guard3-agent.Modelfile.
+        """
+        if self._response_ok is None:
+            from src.eval.judge import GuardTemplateError, check_response_mode
+
+            try:
+                check_response_mode(self.adapter)
+                self._response_ok = True
+            except GuardTemplateError as exc:
+                logger.error("Output guard disabled: %s", exc)
+                self._response_ok = False
+        return self._response_ok
 
     def classify(self, user_text: str) -> GuardResult:
         start = time.perf_counter()
@@ -87,8 +106,11 @@ class InputGuard:
         """Classify the model's answer in the context of the user's message.
 
         With a user turn followed by an assistant turn, Llama Guard's chat
-        template asks whether the *assistant* turn is unsafe.
+        template asks whether the *assistant* turn is unsafe. Raises when the
+        template cannot do that, so the caller bypasses the output guard.
         """
+        if not self._check_response_mode():
+            raise RuntimeError("guard template rates the request, not the answer")
         start = time.perf_counter()
         messages = [{"role": "user", "content": user_text[-MAX_CONTEXT_CHARS:]},
                     {"role": "assistant", "content": answer[:MAX_CONTEXT_CHARS]}]

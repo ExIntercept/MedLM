@@ -76,11 +76,28 @@ def test_classify_response_sends_both_turns_and_keeps_the_request_end():
         return "safe"
 
     long_prompt = "x" * 20000 + " the actual request"
-    InputGuard(CallableAdapter(guard)).classify_response(long_prompt, "answer")
+    g = InputGuard(CallableAdapter(guard))
+    g._response_ok = True  # template check covered below
+    g.classify_response(long_prompt, "answer")
     user, assistant = seen["messages"]
     assert (user["role"], assistant["role"]) == ("user", "assistant")
     assert user["content"].endswith("the actual request") and len(user["content"]) <= 12000
     assert assistant["content"] == "answer"
+
+
+@pytest.mark.parametrize("judges_request,usable", [(False, True), (True, False)])
+def test_output_guard_needs_a_template_that_rates_the_answer(judges_request, usable):
+    def guard(messages, temperature, max_tokens):
+        if messages[-1]["role"] == "user" or judges_request:
+            return "unsafe\nS2"
+        return "safe"
+
+    g = InputGuard(CallableAdapter(guard))
+    if usable:
+        assert g.classify_response("request", "I can't help with that.").unsafe is False
+    else:
+        with pytest.raises(RuntimeError, match="rates the request"):
+            g.classify_response("request", "I can't help with that.")
 
 
 @pytest.mark.parametrize("provider", ["openai_chat", "completions"])

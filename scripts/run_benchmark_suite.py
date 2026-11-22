@@ -41,7 +41,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 from src.eval.benchmarks import SUITES, BenchItem, load_suites  # noqa: E402
-from src.eval.judge import HeuristicJudge, LlamaGuardJudge, extract_choice  # noqa: E402
+from src.eval.judge import HeuristicJudge, LlamaGuardJudge, check_response_mode, extract_choice  # noqa: E402
 from src.llm.adapters import CallableAdapter, LLMUnavailable, OpenAIChatAdapter, for_medical_model  # noqa: E402
 from src.security.gateway import DEFAULT_TOGGLES, ClinicalDefenseGateway  # noqa: E402
 
@@ -548,6 +548,12 @@ def main():
                 ap.error(f"judge base_url {jc['base_url']} is not set; add it to .env (see colab/ notebook)")
             judge = LlamaGuardJudge(OpenAIChatAdapter(os.path.expandvars(jc["base_url"]), jc["model"],
                                                       os.environ.get(jc.get("api_key_env", ""), "")))
+            check_response_mode(judge.adapter)
+            from src.security.llama_guard import get_input_guard
+
+            guard = get_input_guard()  # the gateway's own guard also checks answers (stage 9)
+            if guard is not None:
+                check_response_mode(guard.adapter)
         else:
             judge = HeuristicJudge()
         report = run_e2e(items, models, judge, use_rag=not args.no_rag, seed=args.seed, limit=limit,
