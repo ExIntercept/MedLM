@@ -10,7 +10,7 @@ const FIELDS = [
 
 export default function PatientIntakeForm({ profile, onChange }) {
   return (
-    <div className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+    <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="mb-3 flex items-center gap-2 border-b border-slate-border pb-3">
         <ClipboardList size={16} className="text-clinical-teal" />
         <h2 className="text-[15px] font-semibold text-clinical-ink">Patient Intake Form</h2>
@@ -24,7 +24,7 @@ export default function PatientIntakeForm({ profile, onChange }) {
               value={profile[field.key] ?? ""}
               placeholder={field.placeholder}
               onChange={(e) => onChange({ ...profile, [field.key]: e.target.value })}
-              className="w-full rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-white focus:ring-2 focus:ring-clinical-teal/20"
+              className="w-full rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-surface focus:ring-2 focus:ring-clinical-teal/20"
             />
           </label>
         ))}

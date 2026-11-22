@@ -80,7 +80,7 @@ export default function EvidenceExplorer({ mode = "clinician" }) {
   };
 
   return (
-    <div className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+    <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <h2 className="mb-3 text-[15px] font-semibold text-clinical-ink">
         Search StatPearls, OpenFDA &amp; MedQuAD Guideline Chunks
       </h2>
@@ -102,7 +102,7 @@ export default function EvidenceExplorer({ mode = "clinician" }) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && runSearch()}
           placeholder="e.g. metformin renal dosing, warfarin pregnancy, potassium chloride infusion..."
-          className="flex-1 rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-white focus:ring-2 focus:ring-clinical-teal/20"
+          className="flex-1 rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-surface focus:ring-2 focus:ring-clinical-teal/20"
         />
         <button
           type="button"

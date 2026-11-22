@@ -20,7 +20,7 @@ export default function EvidenceAccordion({ sources }) {
         <ChevronDown size={16} className={cn("transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <ul className="divide-y divide-slate-border bg-white">
+        <ul className="divide-y divide-slate-border bg-surface">
           {sources.map((src, i) => (
             <li key={`${src.chunk_id}-${i}`} className="px-3 py-2.5 text-sm">
               <div className="font-medium text-clinical-ink">{src.title}</div>

@@ -57,7 +57,7 @@ export default function CrossModelResults() {
 
   if (error) {
     return (
-      <div className="rounded-xl border border-slate-border bg-white p-4 text-sm text-clinical-muted shadow-card">
+      <div className="rounded-xl border border-slate-border bg-surface p-4 text-sm text-clinical-muted shadow-card">
         <p className="font-semibold text-clinical-ink">Cross-model defense results</p>
         <p className="mt-1">{error}</p>
       </div>
@@ -65,7 +65,7 @@ export default function CrossModelResults() {
   }
   if (!data) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-slate-border bg-white p-4 text-sm text-clinical-muted shadow-card">
+      <div className="flex items-center gap-2 rounded-xl border border-slate-border bg-surface p-4 text-sm text-clinical-muted shadow-card">
         <Loader2 size={16} className="animate-spin text-clinical-teal" /> Loading cross-model results…
       </div>
     );
@@ -86,7 +86,7 @@ export default function CrossModelResults() {
   ];
 
   return (
-    <div className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+    <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-clinical-ink">

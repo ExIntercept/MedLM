@@ -35,7 +35,7 @@ function Switch({ checked, onChange, disabled }) {
 
 function Panel({ title, action, children }) {
   return (
-    <section className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+    <section className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-[15px] font-semibold text-clinical-ink">{title}</h2>
         {action}
@@ -84,7 +84,7 @@ export default function SecurityConsole() {
 
   if (loading && !config) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center rounded-xl border border-slate-border bg-white shadow-card">
+      <div className="flex min-h-[40vh] items-center justify-center rounded-xl border border-slate-border bg-surface shadow-card">
         <Loader2 size={22} className="animate-spin text-clinical-teal" />
       </div>
     );
@@ -156,7 +156,7 @@ export default function SecurityConsole() {
         ) : (
           <div className="max-h-[60vh] overflow-auto">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-white text-clinical-muted">
+              <thead className="sticky top-0 bg-surface text-clinical-muted">
                 <tr>
                   <th className="py-1.5 pr-2 font-semibold">Time</th>
                   <th className="py-1.5 pr-2 font-semibold">Decision</th>

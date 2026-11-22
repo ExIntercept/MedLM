@@ -1,19 +1,23 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
+        // Theme colours are CSS variables (src/index.css), switched by the
+        // "dark" class on <html>.
+        surface: "rgb(var(--c-surface) / <alpha-value>)",
         slate: {
-          bg: "#f8fafc",
-          border: "#e2e8f0",
+          bg: "rgb(var(--c-bg) / <alpha-value>)",
+          border: "rgb(var(--c-border) / <alpha-value>)",
         },
         clinical: {
           teal: "#0d9488",
           "teal-dark": "#0f766e",
-          "teal-tint": "#f0fdfa",
-          ink: "#0f172a",
-          muted: "#64748b",
+          "teal-tint": "rgb(var(--c-teal-tint) / <alpha-value>)",
+          ink: "rgb(var(--c-ink) / <alpha-value>)",
+          muted: "rgb(var(--c-muted) / <alpha-value>)",
         },
       },
       fontFamily: {

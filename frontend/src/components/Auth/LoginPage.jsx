@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-white focus:ring-2 focus:ring-clinical-teal/20";
+  "w-full rounded-lg border border-slate-border bg-slate-bg px-3 py-2 text-sm text-clinical-ink outline-none transition focus:border-clinical-teal focus:bg-surface focus:ring-2 focus:ring-clinical-teal/20";
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -46,7 +46,7 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-clinical-muted">Secure clinical decision support &amp; intake portal</p>
         </div>
 
-        <div className="rounded-xl border border-slate-border bg-white p-6 shadow-elevated">
+        <div className="rounded-xl border border-slate-border bg-surface p-6 shadow-elevated">
           <div className="mb-5 flex overflow-hidden rounded-lg border border-slate-border text-sm font-semibold">
             {[
               { key: "login", label: "Log In" },
@@ -61,7 +61,7 @@ export default function LoginPage() {
                 }}
                 className={cn(
                   "flex-1 px-3 py-2 transition",
-                  mode === tab.key ? "bg-clinical-teal text-white" : "bg-white text-clinical-muted hover:bg-slate-bg"
+                  mode === tab.key ? "bg-clinical-teal text-white" : "bg-surface text-clinical-muted hover:bg-slate-bg"
                 )}
               >
                 {tab.label}

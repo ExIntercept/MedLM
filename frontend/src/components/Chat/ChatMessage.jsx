@@ -113,7 +113,7 @@ export default function ChatMessage({ role, content, sources, audit, triage, isS
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
           isUser
-            ? "bg-clinical-ink text-white"
+            ? "bg-clinical-ink text-surface"
             : isEmergency
             ? "bg-red-100 text-red-600"
             : "bg-clinical-teal-tint text-clinical-teal-dark"
@@ -125,10 +125,10 @@ export default function ChatMessage({ role, content, sources, audit, triage, isS
         className={cn(
           "max-w-[75%] rounded-xl border px-4 py-3 shadow-card",
           isUser
-            ? "border-clinical-teal-dark bg-clinical-ink text-white"
+            ? "border-clinical-ink bg-clinical-ink text-surface"
             : isEmergency
             ? "border-red-300 bg-red-50 text-clinical-ink"
-            : "border-slate-border bg-white text-clinical-ink"
+            : "border-slate-border bg-surface text-clinical-ink"
         )}
       >
         {isUser ? (

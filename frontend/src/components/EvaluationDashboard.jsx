@@ -97,7 +97,7 @@ function ClinicalQABenchmark() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-slate-border bg-white p-8 shadow-card text-clinical-muted">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-slate-border bg-surface p-8 shadow-card text-clinical-muted">
         <Loader2 size={24} className="animate-spin text-clinical-teal" />
         <p className="text-sm">Loading evaluation results…</p>
       </div>
@@ -122,7 +122,7 @@ function ClinicalQABenchmark() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+      <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="flex items-center gap-2 text-[15px] font-semibold text-clinical-ink">
@@ -138,7 +138,7 @@ function ClinicalQABenchmark() {
             <button
               type="button"
               onClick={openReport}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-border bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-bg"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-border bg-surface px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-bg"
             >
               <FileText size={14} />
               View BENCHMARK_REPORT.md
@@ -167,7 +167,7 @@ function ClinicalQABenchmark() {
         <KpiCard label="Key-Phrase Grounding" value={pct(m.key_phrase_coverage_avg)} />
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-border bg-white shadow-card">
+      <div className="overflow-hidden rounded-xl border border-slate-border bg-surface shadow-card">
         <div className="border-b border-slate-border px-4 py-3">
           <h3 className="text-[15px] font-semibold text-clinical-ink">Baseline vs. Hybrid RAG — Per-Case Breakdown</h3>
         </div>
@@ -215,7 +215,7 @@ function ClinicalQABenchmark() {
       {reportOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReportOpen(false)}>
           <div
-            className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-border bg-white shadow-elevated"
+            className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-border bg-surface shadow-elevated"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-border px-4 py-3">

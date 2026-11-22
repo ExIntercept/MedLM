@@ -15,7 +15,7 @@ function formatTimestamp(iso) {
 
 export default function ConsultationHistory({ sessions, activeSessionId, onSelect, onNewConsultation }) {
   return (
-    <div className="rounded-xl border border-slate-border bg-white p-4 shadow-card">
+    <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between border-b border-slate-border pb-3">
         <div className="flex items-center gap-2">
           <FolderClock size={16} className="text-clinical-teal" />

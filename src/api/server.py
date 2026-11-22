@@ -1,5 +1,6 @@
 """FastAPI backend with JWT auth, hybrid RAG retrieval, and real-time MedGemma streaming from Colab."""
 import asyncio
+import os
 import json
 import queue
 import threading
@@ -76,6 +77,7 @@ class UserPublic(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    role: Literal["patient", "clinician", "admin"] = "patient"
 
 
 class TokenResponse(BaseModel):
@@ -187,9 +189,33 @@ def _require_admin(current_user: ApiUser = Depends(get_current_user)) -> ApiUser
     return current_user
 
 
+def user_role(username: str) -> str:
+    """admin (ADMIN_USERNAMES), clinician (CLINICIAN_USERNAMES) or patient (everyone else).
+
+    New accounts are patients. Roles come from configuration rather than the
+    database, so nobody can grant themselves one through the API.
+    """
+    if username in ADMIN_USERNAMES:
+        return "admin"
+    clinicians = {u.strip() for u in os.environ.get("CLINICIAN_USERNAMES", "").split(",") if u.strip()}
+    return "clinician" if username in clinicians else "patient"
+
+
+def _require_clinician(current_user: ApiUser = Depends(get_current_user)) -> ApiUser:
+    if user_role(current_user.username) == "patient":
+        raise HTTPException(status_code=403, detail="Clinician access required.")
+    return current_user
+
+
 # --------------------------------------------------------------------------
 # Health Endpoint
 # --------------------------------------------------------------------------
+def _guard_model() -> str:
+    from src.config import GUARD_BASE_URL, GUARD_MODEL
+
+    return GUARD_MODEL if GUARD_BASE_URL and GUARD_MODEL else ""
+
+
 @app.get("/api/health")
 def health():
     colab_health = health_sync()
@@ -212,6 +238,8 @@ def health():
         "model": LLM_MODEL,
         "llm_provider": LLM_PROVIDER,
         "prompt_style": LLM_TEMPLATE if LLM_PROVIDER == "completions" else "server_chat_template",
+        "guard_model": _guard_model(),
+        "output_guard": bool(_guard_model()) and PIPELINE_CONFIG.get("layer_output_guard", True),
         "status": "ok" if (colab_health.get("ok", False) and chromadb_ok and reranker_ok) else "degraded",
     }
 
@@ -308,7 +336,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 @app.get("/api/auth/me", response_model=UserPublic)
 def read_me(current_user: ApiUser = Depends(get_current_user)):
-    return UserPublic(id=current_user.id, username=current_user.username, email=current_user.email)
+    return UserPublic(id=current_user.id, username=current_user.username, email=current_user.email,
+                      role=user_role(current_user.username))
 
 
 # --------------------------------------------------------------------------
@@ -370,7 +399,7 @@ _PATIENT_FRIENDLY_FIELDS = {"clinical_guideline", "indications"}
 
 
 @app.get("/api/evidence/search")
-def search_evidence(q: str = "", mode: str = "clinician", current_user: ApiUser = Depends(get_current_user)):
+def search_evidence(q: str = "", mode: str = "clinician", current_user: ApiUser = Depends(_require_clinician)):
     query = q.strip()
     if not query:
         return {"results": []}
@@ -478,6 +507,10 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(get_current_user)):
+    # Clinician mode gives case-level detail (dosing, differentials); patients
+    # always get patient mode, whatever the client sends.
+    if user_role(current_user.username) == "patient":
+        req.mode = "patient"
     with Session(ENGINE) as db:
         if req.conversation_id:
             try:

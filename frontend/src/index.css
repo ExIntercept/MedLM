@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme colours (space-separated RGB, used by tailwind.config.js). */
+:root {
+  --c-surface: 255 255 255;
+  --c-bg: 248 250 252;
+  --c-border: 226 232 240;
+  --c-ink: 15 23 42;
+  --c-muted: 100 116 139;
+  --c-teal-tint: 240 253 250;
+  color-scheme: light;
+}
+.dark {
+  --c-surface: 17 24 39;
+  --c-bg: 3 7 18;
+  --c-border: 41 51 66;
+  --c-ink: 226 232 240;
+  --c-muted: 148 163 184;
+  --c-teal-tint: 19 52 50;
+  color-scheme: dark;
+}
+
 html, body, #root {
   height: 100%;
 }
@@ -13,6 +33,10 @@ body {
 ::selection {
   background: #ccfbf1;
   color: #0f172a;
+}
+.dark ::selection {
+  background: #115e59;
+  color: #f0fdfa;
 }
 
 * {
@@ -27,6 +51,12 @@ body {
   background-color: #cbd5e1;
   border-radius: 999px;
 }
+.dark * {
+  scrollbar-color: #334155 transparent;
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: #334155;
+}
 
 @layer utilities {
   .status-dot {
@@ -37,3 +67,26 @@ body {
     background: #16a34a;
   }
 }
+
+/* Dark theme: status tints and fixed Tailwind greys used by components.
+   ".dark .x" outranks ".x", so these win without touching every component. */
+.dark .bg-red-50 { background-color: rgb(127 29 29 / 0.28); }
+.dark .bg-red-100 { background-color: rgb(127 29 29 / 0.45); }
+.dark .bg-amber-50 { background-color: rgb(120 53 15 / 0.28); }
+.dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.45); }
+.dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.32); }
+.dark .bg-sky-50 { background-color: rgb(12 74 110 / 0.32); }
+.dark .bg-slate-100 { background-color: rgb(30 41 59); }
+.dark .bg-slate-200 { background-color: rgb(51 65 85); }
+.dark .bg-slate-300 { background-color: rgb(71 85 105); }
+.dark .border-red-200, .dark .border-red-300 { border-color: rgb(153 27 27 / 0.7); }
+.dark .border-amber-200 { border-color: rgb(146 64 14 / 0.7); }
+.dark .border-emerald-200 { border-color: rgb(6 95 70 / 0.7); }
+.dark .border-sky-200 { border-color: rgb(7 89 133 / 0.7); }
+.dark .text-red-600, .dark .text-red-700, .dark .text-red-800 { color: rgb(252 165 165); }
+.dark .text-amber-700, .dark .text-amber-800 { color: rgb(252 211 77); }
+.dark .text-emerald-700, .dark .text-emerald-800 { color: rgb(110 231 183); }
+.dark .text-sky-800 { color: rgb(125 211 252); }
+.dark .text-slate-600, .dark .text-slate-700 { color: rgb(203 213 225); }
+.dark .text-clinical-teal, .dark .text-clinical-teal-dark { color: rgb(94 234 212); }
+.dark .shadow-card { box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }

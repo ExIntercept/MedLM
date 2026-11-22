@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import Header from "./components/Header";
+import { tabsFor } from "./lib/roles";
 import Sidebar from "./components/Sidebar/Sidebar";
 import ChatThread from "./components/Chat/ChatThread";
 import ChatInput from "./components/Chat/ChatInput";
@@ -14,11 +15,15 @@ import { useChatStream } from "./hooks/useChatStream";
 import { useAuth } from "./context/AuthContext";
 import { createConversation, getConversations } from "./lib/api";
 import { cn } from "./lib/cn";
+import { useTheme } from "./lib/theme";
 
 const EMPTY_PROFILE = { age: "", sex: "", duration: "", conditions: "", medications: "" };
 
 function Workspace() {
   const { user, logout } = useAuth();
+  const { theme, toggle: toggleTheme } = useTheme();
+  const role = user?.role || "patient";
+  const isClinician = role === "clinician" || role === "admin";
   const [activeTab, setActiveTab] = useState("consultation");
   const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [conversations, setConversations] = useState([]);
@@ -65,8 +70,12 @@ function Workspace() {
     reset([]);
   };
 
+  // Patients always use patient mode; the server enforces this too.
+  const chatMode = isClinician ? mode : "patient";
+  const visibleTab = tabsFor(role).some((t) => t.key === activeTab) ? activeTab : "consultation";
+
   const handleSend = (message) => {
-    send({ message, patientProfile: profile, mode });
+    send({ message, patientProfile: profile, mode: chatMode });
   };
 
   const handleSignOut = () => {
@@ -76,13 +85,16 @@ function Workspace() {
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 md:p-6">
       <Header
-        username={user?.username || "Clinician"}
-        activeTab={activeTab}
+        username={user?.username || "User"}
+        role={role}
+        activeTab={visibleTab}
         onTabChange={setActiveTab}
         onSignOut={handleSignOut}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
-      {activeTab === "consultation" && (
+      {visibleTab === "consultation" && (
         <div className="flex flex-1 flex-col gap-4 md:flex-row">
           <Sidebar
             profile={profile}
@@ -93,9 +105,10 @@ function Workspace() {
             onNewConsultation={handleNewConsultation}
           />
 
-          <main className="flex min-h-[70vh] flex-1 flex-col rounded-xl border border-slate-border bg-white p-4 shadow-card">
+          <main className="flex min-h-[70vh] flex-1 flex-col rounded-xl border border-slate-border bg-surface p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between border-b border-slate-border pb-3">
               <h2 className="text-[15px] font-semibold text-clinical-ink">Consultation</h2>
+              {isClinician && (
               <div className="flex overflow-hidden rounded-lg border border-slate-border text-xs font-semibold">
                 {[
                   { key: "patient", label: "Patient" },
@@ -109,13 +122,14 @@ function Workspace() {
                       "px-3 py-1.5 transition",
                       mode === opt.key
                         ? "bg-clinical-teal text-white"
-                        : "bg-white text-clinical-muted hover:bg-slate-bg"
+                        : "bg-surface text-clinical-muted hover:bg-slate-bg"
                     )}
                   >
                     {opt.label}
                   </button>
                 ))}
               </div>
+              )}
             </div>
 
             <ChatThread messages={messages} isStreaming={isStreaming} />
@@ -133,11 +147,11 @@ function Workspace() {
         </div>
       )}
 
-      {activeTab === "records" && <MedicalRecords sessions={conversations} />}
-      {activeTab === "prescriptions" && <Prescriptions profile={profile} />}
-      {activeTab === "evidence" && <EvidenceExplorer mode={mode} />}
-      {activeTab === "evaluation" && <EvaluationDashboard />}
-      {activeTab === "security" && <SecurityConsole />}
+      {visibleTab === "records" && <MedicalRecords sessions={conversations} />}
+      {visibleTab === "prescriptions" && <Prescriptions profile={profile} />}
+      {visibleTab === "evidence" && <EvidenceExplorer mode={chatMode} />}
+      {visibleTab === "evaluation" && <EvaluationDashboard />}
+      {visibleTab === "security" && <SecurityConsole />}
     </div>
   );
 }

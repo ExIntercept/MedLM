@@ -28,7 +28,7 @@ export default function ChatInput({ onSend, onStop, disabled, isStreaming }) {
   };
 
   return (
-    <div className="flex items-end gap-2 rounded-xl border border-slate-border bg-white p-2 shadow-card">
+    <div className="flex items-end gap-2 rounded-xl border border-slate-border bg-surface p-2 shadow-card">
       <textarea
         ref={textareaRef}
         value={value}
@@ -42,7 +42,7 @@ export default function ChatInput({ onSend, onStop, disabled, isStreaming }) {
         <button
           type="button"
           onClick={onStop}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-border bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-bg"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-border bg-surface px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-bg"
         >
           <Square size={14} />
           Stop

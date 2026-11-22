@@ -9,7 +9,7 @@ const ICONS = { error: AlertTriangle, success: CheckCircle2, info: Info };
 const TONES = {
   error: "border-red-200 bg-red-50 text-red-800",
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  info: "border-slate-border bg-white text-clinical-ink",
+  info: "border-slate-border bg-surface text-clinical-ink",
 };
 
 export function ToastProvider({ children }) {
