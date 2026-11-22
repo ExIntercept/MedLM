@@ -3,16 +3,26 @@ import { ChevronDown, Loader2, ShieldCheck } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Markdown } from "../lib/markdown";
 import { getCrossModelResults } from "../lib/api";
+import { STOP_STAGES as STAGES } from "../lib/defense";
 
-const STAGES = [
-  { key: "input detectors", label: "Input detectors", color: "bg-clinical-teal" },
-  { key: "guardrails", label: "Guardrails", color: "bg-teal-400" },
-  { key: "emergency triage", label: "Triage", color: "bg-teal-300" },
-  { key: "grounding check", label: "Grounding check", color: "bg-amber-400" },
-  { key: "output guard", label: "Output guard", color: "bg-violet-500" },
-  { key: "model refused", label: "Model refused", color: "bg-slate-400" },
-  { key: "answered", label: "Answered", color: "bg-slate-200" },
-];
+/** Says which bar is which, for every paired-bar column. */
+function BarLegend({ judge }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-bg px-3 py-2 text-[11px] text-clinical-muted">
+      <span className="font-semibold text-clinical-ink">Reading the bars:</span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-5 rounded bg-red-400" /> top bar = the model alone (<b className="font-semibold">undefended</b>)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-5 rounded bg-clinical-teal" /> bottom bar = the same model through the MedLM gateway (<b className="font-semibold">defended</b>)
+      </span>
+      <span>
+        Attack success = share of attack prompts whose final answer the judge rated harmful; judge: {judge}.
+        In MedQA accuracy the top bar is grey.
+      </span>
+    </div>
+  );
+}
 
 function pct(r) {
   return r && r.n ? `${r.pct.toFixed(1)}%` : "n/a";
@@ -28,7 +38,7 @@ function PairBars({ before, after, beforeTone = "bg-red-400", afterTone = "bg-cl
   return (
     <div className="w-40 space-y-1">
       {[[before, beforeTone], [after, afterTone]].map(([r, tone], i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} className="flex items-center gap-2" title={`${i === 0 ? "Model alone (undefended)" : "Through the MedLM gateway (defended)"}: ${pct(r)}`}>
           <div className="h-2 flex-1 rounded bg-slate-100">
             <div className={cn("h-2 rounded", tone)} style={{ width: w(r) }} />
           </div>
@@ -80,9 +90,9 @@ export default function CrossModelResults() {
     return rs.length ? rs.reduce((a, r) => a + r.pct, 0) / rs.length : null;
   };
   const kpis = [
-    { label: "Attack success, undefended", value: avg("undefended", "asr_j1"), tone: "text-red-600" },
-    { label: "Attack success, defended", value: avg("defended", "asr_j1"), tone: "text-clinical-teal-dark" },
-    { label: "Medical questions refused, defended", value: avg("defended", "med_refused"), tone: "text-clinical-ink" },
+    { label: "Attack success · model alone", value: avg("undefended", "asr_j1"), tone: "text-red-600" },
+    { label: "Attack success · through gateway", value: avg("defended", "asr_j1"), tone: "text-clinical-teal-dark" },
+    { label: "Medical questions refused · through gateway", value: avg("defended", "med_refused"), tone: "text-clinical-ink" },
   ];
 
   return (
@@ -121,15 +131,17 @@ export default function CrossModelResults() {
         ))}
       </div>
 
-      <div className="mt-4 overflow-x-auto">
+      <BarLegend judge="Llama Guard 3 8B (judge 1); the 2nd judge is Qwen3-8B, a different model family" />
+
+      <div className="mt-3 overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="text-clinical-muted">
             <tr className="border-b border-slate-border">
               <th className="py-2 pr-3 font-semibold">Model</th>
-              <th className="py-2 pr-3 font-semibold">Attack success<br /><span className="font-normal">undefended / defended</span></th>
-              <th className="py-2 pr-3 font-semibold">2nd judge<br /><span className="font-normal">undef / def</span></th>
+              <th className="py-2 pr-3 font-semibold">Attack success<br /><span className="font-normal">top: alone · bottom: gateway</span></th>
+              <th className="py-2 pr-3 font-semibold">2nd judge<br /><span className="font-normal">alone / gateway</span></th>
               <th className="py-2 pr-3 font-semibold">McNemar p</th>
-              <th className="py-2 pr-3 font-semibold">MedQA accuracy<br /><span className="font-normal">undefended / defended</span></th>
+              <th className="py-2 pr-3 font-semibold">MedQA accuracy<br /><span className="font-normal">top: alone · bottom: gateway</span></th>
               <th className="py-2 pr-3 font-semibold">Medical refused<br /><span className="font-normal">defended</span></th>
               <th className="py-2 font-semibold">General refused<br /><span className="font-normal">defended</span></th>
             </tr>
@@ -161,6 +173,11 @@ export default function CrossModelResults() {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-clinical-muted">
             Where defended attacks were stopped
           </h3>
+          <p className="mt-0.5 text-[11px] text-clinical-muted">
+            One bar per model: all its attack prompts sent through the gateway, coloured by the numbered stage that
+            stopped each one. “Answered” means the prompt got a reply; whether that reply was harmful is what the
+            judge decides above.
+          </p>
           <div className="mt-2 space-y-1.5">
             {Object.entries(stages).map(([m, cnt]) => {
               const total = Object.values(cnt).reduce((a, b) => a + b, 0) || 1;

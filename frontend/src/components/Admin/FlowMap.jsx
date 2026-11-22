@@ -1,5 +1,5 @@
 import { cn } from "../../lib/cn";
-import { OUTCOME_LABEL, outcomeTone } from "../../lib/defense";
+import { OUTCOME_LABEL, STAGE_BY_KEY, outcomeTone } from "../../lib/defense";
 
 // Left-to-right map of the gateway. The four detectors fan out of "Detect"
 // and back into "Retrieve"; evidence hangs off "Retrieve". A request that is
@@ -10,21 +10,21 @@ const MAIN_Y = 150;
 
 const NODES = [
   { id: "input", label: "Message", x: 8, y: MAIN_Y },
-  { id: "sanitize", label: "Sanitize", x: 132, y: MAIN_Y },
-  { id: "triage", label: "Triage", x: 256, y: MAIN_Y },
-  { id: "guardrails", label: "Guardrails", x: 380, y: MAIN_Y },
-  { id: "detect", label: "Detect", x: 504, y: MAIN_Y },
+  { id: "sanitize", label: STAGE_BY_KEY.sanitize.label, x: 132, y: MAIN_Y },
+  { id: "triage", label: STAGE_BY_KEY.triage.label, x: 256, y: MAIN_Y },
+  { id: "guardrails", label: STAGE_BY_KEY.guardrails.label, x: 380, y: MAIN_Y },
+  { id: "detect", label: STAGE_BY_KEY.detect.label, x: 504, y: MAIN_Y },
   { id: "A", label: "A · Injection", x: 636, y: 28, small: true },
   { id: "B", label: "B · Jailbreak", x: 636, y: 84, small: true },
   { id: "H", label: "H · Harm intent", x: 636, y: 216, small: true },
   { id: "G", label: "G · Llama Guard", x: 636, y: 272, small: true },
-  { id: "clarify", label: "Clarify", x: 768, y: 58, small: true },
-  { id: "retrieve", label: "Retrieve", x: 768, y: MAIN_Y },
+  { id: "clarify", label: STAGE_BY_KEY.clarify.label, x: 768, y: 58, small: true },
+  { id: "retrieve", label: STAGE_BY_KEY.retrieve.label, x: 768, y: MAIN_Y },
   { id: "evidence", label: "Evidence", x: 768, y: 250, small: true },
-  { id: "harden", label: "Harden", x: 892, y: MAIN_Y },
-  { id: "generate", label: "Generate", x: 1016, y: MAIN_Y },
-  { id: "verify", label: "Verify", x: 1140, y: MAIN_Y },
-  { id: "output_guard", label: "Output guard", x: 1264, y: MAIN_Y },
+  { id: "harden", label: STAGE_BY_KEY.harden.label, x: 892, y: MAIN_Y },
+  { id: "generate", label: STAGE_BY_KEY.generate.label, x: 1016, y: MAIN_Y },
+  { id: "verify", label: STAGE_BY_KEY.verify.label, x: 1140, y: MAIN_Y },
+  { id: "output_guard", label: STAGE_BY_KEY.output_guard.label, x: 1264, y: MAIN_Y },
   { id: "response", label: "Response", x: 1388, y: MAIN_Y },
 ];
 const BY_ID = Object.fromEntries(NODES.map((n) => [n.id, n]));

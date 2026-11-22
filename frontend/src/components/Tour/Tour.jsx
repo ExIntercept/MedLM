@@ -36,7 +36,7 @@ const STEPS = {
 STEPS.admin = [
   ...STEPS.clinician.slice(0, -2),
   { target: "status", title: "System status", body: "All services at a glance: the medical model, evidence search and the two Llama Guard checks. Click for details." },
-  { target: "tab-security", title: "Admin Console", body: "Watch every request move through the pipeline live, see which stage stopped an attack, switch the medical model, toggle defense layers and review users. Opening a user's conversation is recorded in the access log." },
+  { target: "tab-security", title: "Admin Console", body: "Watch every request move through the pipeline live, see which stage stopped an attack, switch the medical model, turn gateway stages on or off and review users. Opening a user's conversation is recorded in the access log." },
   STEPS.clinician[STEPS.clinician.length - 2],
   { title: "You're all set", body: "Tip: in Admin Console, click any request in Live pipeline to see its map and stage-by-stage timeline." },
 ];

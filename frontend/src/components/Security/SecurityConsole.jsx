@@ -193,16 +193,27 @@ export default function SecurityConsole({ hidePipeline = false }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
       <Panel
-        title="Defense layers"
+        title="Gateway stages"
         action={<span className="text-xs text-clinical-muted">Changes apply to the next message</span>}
       >
         {error && <p className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
+        <p className="mb-1 text-[11px] text-clinical-muted">
+          Numbers are the stage order (1–9). Stages 5, 7 and 8 (retrieval, generation, grounding check) have no switch.
+          The attack-detector master switch also turns the output guard off.
+        </p>
         <ul className="divide-y divide-slate-border">
           {TOGGLES.map((t) => (
-            <li key={t.key} className="flex items-center justify-between gap-3 py-2.5">
-              <div>
-                <div className="text-sm font-semibold text-clinical-ink">{t.label}</div>
-                <div className="text-xs text-clinical-muted">{t.hint}</div>
+            <li key={t.key} className={cn("flex items-center justify-between gap-3 py-2.5", t.sub && "pl-7")}>
+              <div className="flex min-w-0 gap-2">
+                {!t.sub && (
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-clinical-teal text-[10px] font-bold text-white">
+                    {t.stage}
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <div className={cn("font-semibold text-clinical-ink", t.sub ? "text-[13px]" : "text-sm")}>{t.label}</div>
+                  <div className="text-xs text-clinical-muted">{t.hint}</div>
+                </div>
               </div>
               <Switch
                 checked={toggles[t.key] !== false}

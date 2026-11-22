@@ -13,7 +13,7 @@ const PAGES = [
   { key: "pipeline", label: "Live pipeline", Icon: Activity },
   { key: "users", label: "Users", Icon: UsersIcon },
   { key: "model", label: "Model", Icon: Cpu },
-  { key: "defense", label: "Defense layers", Icon: ShieldCheck },
+  { key: "defense", label: "Gateway stages", Icon: ShieldCheck },
   { key: "audit", label: "Access log", Icon: ScrollText },
 ];
 

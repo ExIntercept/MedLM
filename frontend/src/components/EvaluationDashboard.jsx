@@ -4,6 +4,7 @@ import { cn } from "../lib/cn";
 import { Markdown } from "../lib/markdown";
 import { getEvaluationReport, getEvaluationSummary } from "../lib/api";
 import CrossModelResults from "./CrossModelResults";
+import PipelineOverview from "./PipelineOverview";
 
 function pct(v) {
   return v === null || v === undefined ? "N/A" : `${(v * 100).toFixed(1)}%`;
@@ -47,6 +48,7 @@ function downloadMarkdown(markdown) {
 export default function EvaluationDashboard() {
   return (
     <div className="flex flex-col gap-4">
+      <PipelineOverview />
       <CrossModelResults />
       <ClinicalQABenchmark />
     </div>
