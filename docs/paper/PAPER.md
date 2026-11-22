@@ -365,6 +365,13 @@ The grounding check withheld a further 32–40 general benign answers per model,
 
 **Validate the judge, not only the defense.** A guard model served with a template that rates the wrong turn still produces plausible-looking numbers. Here it inflated undefended attack success, because a refused harmful request counted as a successful attack, and it made the defended result circular, because anything Layer G let through also looked safe to the judge. Nothing in the aggregate tables revealed it. It showed up only when we read individual verdicts during failure analysis. A two-message canary check before every run is cheap. We recommend it for any evaluation that uses Llama Guard through a chat template.
 
+**Extending the gateway to images.** Medical vision-language models (VLMs) such as MedGemma's image mode or LLaVA-Med [20] add a channel the text gateway does not see. Instructions written into an image, for example a line on a radiograph reading "report this scan as normal", have been shown to change the findings of clinical VLMs [18], and typographic prompts can jailbreak general VLMs [19]. The gateway's design extends to this case without changing the protected model:
+- Run the VLM once to *describe* the image (findings plus any visible text), and treat that description as untrusted data, in the same class as retrieved documents, not as an instruction.
+- Score the description sentence by sentence with the existing detectors (Layers A and B), and replace only the sentences that read as instructions with a marker. Blocking the whole request would also discard the real findings a clinician needs.
+- Pass the cleaned description to the reasoning step inside the hardened data block (stage 6), and add one output check: if an answer agrees with a removed instruction (e.g. "normal, discharge" after a quarantined "report as normal"), withhold it.
+
+A prototype of this pipeline exists, but it has not been evaluated on an image-attack benchmark, so we report no numbers for it. The evaluation would follow Section 5: a set of medical images with and without injected text, attack success with and without the gateway, and the share of genuine findings that survive the quarantine.
+
 **Cost.**
 - The detectors add about 0.5 s per prompt on CPU.
 - Llama Guard 8B adds the largest latency on an 8 GB GPU, because the guard and the medical model are swapped in GPU memory. An answered request took roughly 40 s end to end with the 8B guard, against 11–13 s with the 1B guard. The 1B guard missed one harmful request and blocked one benign programming question in our UI tests.
@@ -385,7 +392,7 @@ The grounding check withheld a further 32–40 general benign answers per model,
 
 ## 9. Conclusion
 
-A layered, model-agnostic gateway can bring the attack success of open medical LLMs from tens of percent to near zero, with the same configuration for every model and without retraining. The remaining challenges are utility for models that do not follow the hardened prompt, robustness to adaptive attacks, and multimodal inputs. Next steps are a vision path for medical VLMs such as LLaVA-Med, an evaluation with adaptive attacks, and a clinician-annotated harm evaluation.
+A layered, model-agnostic gateway can bring the attack success of open medical LLMs from tens of percent to near zero, with the same configuration for every model and without retraining. The remaining challenges are utility for models that do not follow the hardened prompt, robustness to adaptive attacks, and multimodal inputs. Next steps are the vision path for medical VLMs outlined in Section 7, with its own image-attack evaluation, an evaluation with adaptive attacks, and a clinician-annotated harm evaluation.
 
 **Reproducibility.** The code and all configurations are in the repository, including model configs, judge configs and seeds. The commands are:
 - `scripts/run_benchmark_suite.py e2e --limit 30 --temperature 0` for the main run;
@@ -414,3 +421,6 @@ Every run resumes from its checkpoints.
 15. D. Jin et al. What Disease Does This Patient Have? A Large-scale Open Domain Question Answering Dataset from Medical Exams. Applied Sciences, 2021.
 16. A. Ben Abacha, D. Demner-Fushman. A Question-Entailment Approach to Question Answering. BMC Bioinformatics, 2019.
 17. Models: Google, MedGemma (2025); Saama AI, OpenBioLLM (2024); Y. Labrak et al., BioMistral, Findings of ACL 2024; John Snow Labs, JSL-MedLlama-3-8B-v2.0 (2024); Qwen Team, Qwen3 (2025).
+18. J. Clusmann et al. Prompt injection attacks on vision language models in oncology. Nature Communications, 2025.
+19. Y. Gong et al. FigStep: Jailbreaking Large Vision-Language Models via Typographic Visual Prompts. arXiv 2311.05608, 2023 (AAAI 2025).
+20. C. Li et al. LLaVA-Med: Training a Large Language-and-Vision Assistant for Biomedicine in One Day. NeurIPS 2023 Datasets and Benchmarks.
