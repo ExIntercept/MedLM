@@ -81,7 +81,8 @@ def detect_prompt_tone(user_input: str) -> str:
     return "clinical_qa"
 
 
-def format_patient_profile(age=None, sex=None, duration=None, conditions=None, medications=None):
+def format_patient_profile(age=None, sex=None, duration=None, conditions=None, medications=None,
+                           allergies=None, past_medications=None):
     bits = []
     if age:
         bits.append(f"The patient is {age} years old")
@@ -93,6 +94,10 @@ def format_patient_profile(age=None, sex=None, duration=None, conditions=None, m
         bits.append(f"existing conditions/history: {conditions}")
     if medications:
         bits.append(f"current medications: {medications}")
+    if past_medications:
+        bits.append(f"previous medications: {past_medications}")
+    if allergies:
+        bits.append(f"allergies: {allergies}")
     if not bits:
         return ""
     return "Patient Profile: " + "; ".join(bits) + "."

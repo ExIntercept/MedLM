@@ -294,3 +294,23 @@ export function getPipelineLog(limit = 100, after = null) {
   if (after) q.set("after", after);
   return adminJson(`/api/admin/pipeline-log?${q}`);
 }
+
+// --------------------------------------------------------------------------
+// Health record (the signed-in user's own)
+// --------------------------------------------------------------------------
+/** Returns { profile: {age, sex, conditions, medications, past_medications, allergies}, updated_at }. */
+export async function getHealthRecord() {
+  const res = await authFetch("/api/health-record");
+  if (!res.ok) throw new Error(`failed to load health record: ${res.status}`);
+  return res.json();
+}
+
+export async function saveHealthRecord(profile) {
+  const res = await authFetch("/api/health-record", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile }),
+  });
+  if (!res.ok) throw new Error(`failed to save health record: ${res.status}`);
+  return res.json();
+}

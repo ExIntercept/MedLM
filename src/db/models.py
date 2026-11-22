@@ -38,3 +38,14 @@ class ConversationMessage(SQLModel, table=True):
     content: str
     meta: Optional[str] = None  # JSON-serialized (faithfulness score, status, etc.)
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class HealthRecord(SQLModel, table=True):
+    """A patient's running health record, built from what they tell the assistant."""
+
+    __tablename__ = "health_records"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="api_users.id", index=True, unique=True, nullable=False)
+    profile: str = "{}"  # JSON: age, sex, conditions, medications, past_medications, allergies
+    updated_at: datetime = Field(default_factory=_utcnow)

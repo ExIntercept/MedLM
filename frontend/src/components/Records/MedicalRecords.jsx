@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Stethoscope } from "lucide-react";
 import ChatMessage from "../Chat/ChatMessage";
 import { getConversationDetail } from "../../lib/api";
+import { PROFILE_FIELDS } from "../../lib/profile";
+import HealthRecordCard from "./HealthRecordCard";
 
 function formatSessionLabel(session) {
   const date = new Date(session.date);
@@ -17,7 +19,7 @@ function formatSessionLabel(session) {
   return `📅 ${stamp} — ${session.subject}`;
 }
 
-export default function MedicalRecords({ sessions }) {
+export default function MedicalRecords({ sessions, isPatient = false, onRecordSaved }) {
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -36,6 +38,7 @@ export default function MedicalRecords({ sessions }) {
 
   return (
     <div className="flex w-full flex-col gap-4">
+      {isPatient && <HealthRecordCard onSaved={onRecordSaved} />}
       <div className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
         <h2 className="mb-3 text-[15px] font-semibold text-clinical-ink">Archived Consultation Transcripts</h2>
         <select
@@ -62,6 +65,18 @@ export default function MedicalRecords({ sessions }) {
         {selectedId && loading && <p className="text-sm text-clinical-muted">Loading transcript…</p>}
         {selectedId && !loading && detail && (
           <div className="flex-1 space-y-5 overflow-y-auto px-1 py-2">
+            {detail.patient_profile && PROFILE_FIELDS.some((f) => detail.patient_profile[f.key]) && (
+              <div className="rounded-lg border border-slate-border bg-slate-bg p-3 text-xs">
+                <div className="mb-1 font-semibold text-clinical-ink">Details at the time of this consultation</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-clinical-muted">
+                  {PROFILE_FIELDS.filter((f) => detail.patient_profile[f.key]).map((f) => (
+                    <span key={f.key}>
+                      {f.label}: <span className="text-clinical-ink">{detail.patient_profile[f.key]}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {detail.messages.length === 0 && (
               <p className="text-sm text-clinical-muted">No messages recorded for this consultation.</p>
             )}

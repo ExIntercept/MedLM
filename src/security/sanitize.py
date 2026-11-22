@@ -251,7 +251,9 @@ def sanitize_text(text: str, max_chars: int) -> SanitizedField:
 # Public API
 # ---------------------------------------------------------------------------
 
-_PROFILE_KEYS: tuple[str, ...] = ("age", "sex", "duration", "conditions", "medications")
+_PROFILE_KEYS: tuple[str, ...] = (
+    "age", "sex", "duration", "conditions", "medications", "past_medications", "allergies",
+)
 
 
 def sanitize_user_inputs(

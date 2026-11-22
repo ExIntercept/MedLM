@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import Header from "./components/Header";
 import { tabsFor } from "./lib/roles";
@@ -13,11 +13,11 @@ import SecurityConsole from "./components/Security/SecurityConsole";
 import LoginPage from "./components/Auth/LoginPage";
 import { useChatStream } from "./hooks/useChatStream";
 import { useAuth } from "./context/AuthContext";
-import { createConversation, getConversations } from "./lib/api";
+import { createConversation, getConversationDetail, getConversations, getHealthRecord, saveHealthRecord } from "./lib/api";
+import { EMPTY_PROFILE, PROFILE_FIELDS, normalizeProfile } from "./lib/profile";
 import { cn } from "./lib/cn";
 import { useTheme } from "./lib/theme";
 
-const EMPTY_PROFILE = { age: "", sex: "", duration: "", conditions: "", medications: "" };
 
 function Workspace() {
   const { user, logout } = useAuth();
@@ -29,6 +29,34 @@ function Workspace() {
   const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [mode, setMode] = useState("patient");
+  const isPatient = role === "patient";
+  const [recentlyUpdated, setRecentlyUpdated] = useState([]);
+  const saveTimer = useRef(null);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+
+  // Patients start from their saved health record; clinicians from a blank case.
+  const loadRecord = useCallback(async () => {
+    if (!isPatient) return EMPTY_PROFILE;
+    try {
+      const { profile: rec } = await getHealthRecord();
+      return normalizeProfile({ ...rec, duration: "" });
+    } catch {
+      return EMPTY_PROFILE;
+    }
+  }, [isPatient]);
+
+  useEffect(() => {
+    loadRecord().then(setProfile);
+  }, [loadRecord]);
+
+  // A patient's own edits are saved to their record shortly after they stop typing.
+  const handleProfileChange = (next) => {
+    setProfile(next);
+    if (!isPatient) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveHealthRecord(next).catch(() => {}), 800);
+  };
 
   const refreshConversations = useCallback(() => {
     getConversations()
@@ -49,12 +77,24 @@ function Workspace() {
     // Auto-fills the Patient Intake sidebar from fields the backend extracts
     // out of the message the user just sent (age/sex/duration/conditions/meds).
     // Only overwrites keys the extractor actually found.
-    onProfileUpdate: (fields) => setProfile((prev) => ({ ...prev, ...fields })),
+    // The server sends the whole merged profile after each screened turn.
+    onProfileUpdate: (fields) => {
+      const prev = profileRef.current;
+      const next = normalizeProfile(fields);
+      const changed = PROFILE_FIELDS.map((f) => f.key).filter((k) => (prev[k] || "") !== (next[k] || ""));
+      setProfile(next);
+      if (changed.length) {
+        setRecentlyUpdated(changed);
+        setTimeout(() => setRecentlyUpdated([]), 4000);
+      }
+    },
   });
 
   const handleNewConsultation = async () => {
+    const start = await loadRecord();
+    setProfile(start);
     try {
-      const { conversation_id } = await createConversation("New Consultation", profile);
+      const { conversation_id } = await createConversation("New Consultation", start);
       setConversationId(conversation_id);
       reset([]);
       refreshConversations();
@@ -68,6 +108,9 @@ function Workspace() {
   const handleSelectConversation = (id) => {
     setConversationId(id);
     reset([]);
+    getConversationDetail(id)
+      .then((d) => d.patient_profile && setProfile(normalizeProfile(d.patient_profile)))
+      .catch(() => {});
   };
 
   // Patients always use patient mode; the server enforces this too.
@@ -98,7 +141,9 @@ function Workspace() {
         <div className="flex flex-1 flex-col gap-4 md:flex-row">
           <Sidebar
             profile={profile}
-            onProfileChange={setProfile}
+            onProfileChange={handleProfileChange}
+            isPatient={isPatient}
+            recentlyUpdated={recentlyUpdated}
             sessions={conversations}
             activeSessionId={conversationId}
             onSelectSession={handleSelectConversation}
@@ -147,7 +192,9 @@ function Workspace() {
         </div>
       )}
 
-      {visibleTab === "records" && <MedicalRecords sessions={conversations} />}
+      {visibleTab === "records" && (
+        <MedicalRecords sessions={conversations} isPatient={isPatient} onRecordSaved={(p) => setProfile((prev) => normalizeProfile({ ...p, duration: prev.duration }))} />
+      )}
       {visibleTab === "prescriptions" && <Prescriptions profile={profile} />}
       {visibleTab === "evidence" && <EvidenceExplorer mode={chatMode} />}
       {visibleTab === "evaluation" && <EvaluationDashboard />}

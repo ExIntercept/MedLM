@@ -2,6 +2,7 @@
 import asyncio
 import os
 import json
+import logging
 import queue
 import threading
 from pathlib import Path
@@ -29,7 +30,7 @@ from src.config import (
     RESERVE_OUTPUT_TOKENS,
     ROOT,
 )
-from src.db.models import ApiUser, Conversation, ConversationMessage
+from src.db.models import ApiUser, Conversation, ConversationMessage, HealthRecord
 from src.db.orm import ENGINE, get_db_session, init_db
 from src.llm.adapters import get_default_adapter
 from src.llm.client import health_sync
@@ -91,6 +92,8 @@ class PatientProfile(BaseModel):
     duration: Optional[str] = None
     conditions: Optional[str] = None
     medications: Optional[str] = None
+    past_medications: Optional[str] = None
+    allergies: Optional[str] = None
 
 
 class ChatTurn(BaseModel):
@@ -130,7 +133,75 @@ def _format_patient_profile(profile: Optional[PatientProfile]) -> str:
         duration=profile.duration,
         conditions=profile.conditions,
         medications=profile.medications,
+        allergies=profile.allergies,
+        past_medications=profile.past_medications,
     )
+
+
+# --------------------------------------------------------------------------
+# Health record: what a patient has told the assistant about themselves
+# --------------------------------------------------------------------------
+_VISIT_ONLY_FIELDS = ("duration",)  # belongs to one consultation, not the long-term record
+
+
+def _safe_record(raw: Optional[dict]) -> dict:
+    """Known fields only, each passed through the input sanitizer before storage."""
+    from src.records.health_record import clean_record
+    from src.security.sanitize import sanitize_text
+
+    out = clean_record(raw)
+    return {k: (sanitize_text(v, 300).model_text if v else "") for k, v in out.items()}
+
+
+def _load_health_record(db: Session, user_id: int) -> dict:
+    row = db.exec(select(HealthRecord).where(HealthRecord.user_id == user_id)).first()
+    return json.loads(row.profile) if row and row.profile else {}
+
+
+def _store_health_record(db: Session, user_id: int, profile: dict) -> dict:
+    from datetime import datetime, timezone
+
+    record = {k: v for k, v in _safe_record(profile).items() if k not in _VISIT_ONLY_FIELDS}
+    row = db.exec(select(HealthRecord).where(HealthRecord.user_id == user_id)).first()
+    if row is None:
+        row = HealthRecord(user_id=user_id)
+    row.profile = json.dumps(record)
+    row.updated_at = datetime.now(timezone.utc)
+    db.add(row)
+    db.commit()
+    return record
+
+
+def _update_records_after_turn(db: Session, result, req: "ChatStreamRequest", conversation_id: int,
+                               user_id: Optional[int], role: str) -> Optional[dict]:
+    """Fold what the user just said about themselves into the consultation and,
+    for patients, their health record. Returns the merged profile for the form.
+
+    Skipped for blocked messages, so an attack never writes to a record. Facts
+    come from the sanitized message; messages about someone else are ignored.
+    """
+    from src.records.health_record import extract_health_facts, merge_record
+
+    if result.status == "BLOCKED" or user_id is None:
+        return None
+    conv = db.get(Conversation, conversation_id)
+    client = req.patient_profile.model_dump() if req.patient_profile else {}
+    if any((v or "").strip() for v in client.values()):
+        base = client
+    elif conv is not None and conv.patient_profile:
+        base = json.loads(conv.patient_profile)
+    elif role == "patient":
+        base = _load_health_record(db, user_id)
+    else:
+        base = {}
+    merged = _safe_record(merge_record(base, extract_health_facts(result.user_text)))
+    if conv is not None:
+        conv.patient_profile = json.dumps(merged)
+        db.add(conv)
+        db.commit()
+    if role == "patient":
+        _store_health_record(db, user_id, merged)
+    return merged
 
 
 # --------------------------------------------------------------------------
@@ -490,12 +561,15 @@ def _patient_done_payload(done: dict) -> dict:
 
 
 def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Queue",
-                  username: str = "", role: str = "patient"):
+                  username: str = "", role: str = "patient", user_id: Optional[int] = None):
     from src.security import pipeline_log
 
     internal_ok = role != "patient"
 
     def on_event(event, data):
+        # The server sends the merged record itself once the turn is screened.
+        if event == "profile_update":
+            return
         if internal_ok or event not in _INTERNAL_EVENTS:
             sink.put({"event": event, "data": data})
 
@@ -516,6 +590,12 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
 
             _save_message(db, conversation_id, "user", result.user_text)
             _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
+            try:
+                merged = _update_records_after_turn(db, result, req, conversation_id, user_id, role)
+                if merged is not None:
+                    sink.put({"event": "profile_update", "data": merged})
+            except Exception as exc:  # a record problem must never lose the answer
+                logging.getLogger(__name__).warning("health record update failed: %s", exc)
 
             done = _done_payload(result)
             pipeline_log.append(pipeline_log.build_record(
@@ -563,7 +643,7 @@ async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(ge
             conversation_id = conv.id
 
     sink: "queue.Queue" = queue.Queue()
-    threading.Thread(target=_run_pipeline, args=(req, conversation_id, sink, current_user.username, role), daemon=True).start()
+    threading.Thread(target=_run_pipeline, args=(req, conversation_id, sink, current_user.username, role, current_user.id), daemon=True).start()
 
     async def event_generator():
         loop = asyncio.get_event_loop()
@@ -612,6 +692,27 @@ def update_defense_config(update: DefenseConfigUpdate, _: ApiUser = Depends(_req
         current.update(update.thresholds)
         DEFENSE_THRESHOLDS_PATH.write_text(json.dumps(current, indent=2), encoding="utf-8")
     return {"status": "ok", "toggles": PIPELINE_CONFIG}
+
+
+class HealthRecordUpdate(BaseModel):
+    profile: PatientProfile
+
+
+@app.get("/api/health-record")
+def get_health_record(current_user: ApiUser = Depends(get_current_user), db: Session = Depends(get_db_session)):
+    """The signed-in user's own running health record."""
+    row = db.exec(select(HealthRecord).where(HealthRecord.user_id == current_user.id)).first()
+    return {
+        "profile": json.loads(row.profile) if row and row.profile else {},
+        "updated_at": row.updated_at.isoformat() if row else None,
+    }
+
+
+@app.put("/api/health-record")
+def put_health_record(update: HealthRecordUpdate, current_user: ApiUser = Depends(get_current_user),
+                      db: Session = Depends(get_db_session)):
+    """Replace the record with the user's own corrections."""
+    return {"profile": _store_health_record(db, current_user.id, update.profile.model_dump())}
 
 
 @app.get("/api/admin/pipeline-log")

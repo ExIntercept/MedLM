@@ -408,7 +408,7 @@ class ClinicalDefenseGateway:
         t_harden = time.perf_counter()
         profile_note = format_patient_profile(
             **{k: (san.profile[k].model_text if k in san.profile else None)
-               for k in ("age", "sex", "duration", "conditions", "medications")}
+               for k in ("age", "sex", "duration", "conditions", "medications", "allergies", "past_medications")}
         )
         forced_tone = "patient" if mode == "patient" else "clinical_qa"
         model_profile = getattr(self.llm, "profile", None)
