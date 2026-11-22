@@ -479,7 +479,26 @@ def _done_payload(result) -> dict:
 # --------------------------------------------------------------------------
 # Real-Time Chat Stream (SSE)
 # --------------------------------------------------------------------------
-def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Queue"):
+# Events that describe the pipeline's internals. Patients see their answer (and
+# the emergency banner) only; how the gateway reached it is for admins.
+_INTERNAL_EVENTS = {"security_status", "verification_status"}
+
+
+def _patient_done_payload(done: dict) -> dict:
+    """What a patient's client learns at the end of a turn: nothing internal."""
+    return {"status": "ANSWERED" if done["status"] in ("PASS", "FLAGGED", "UNGROUNDED") else "NOT_ANSWERED"}
+
+
+def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Queue",
+                  username: str = "", role: str = "patient"):
+    from src.security import pipeline_log
+
+    internal_ok = role != "patient"
+
+    def on_event(event, data):
+        if internal_ok or event not in _INTERNAL_EVENTS:
+            sink.put({"event": event, "data": data})
+
     with Session(ENGINE) as db:
         try:
             # Always use server-side DB history; ignore req.history to prevent
@@ -492,13 +511,18 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
                 history=db_history,
                 mode=req.mode,
                 conversation_id=conversation_id,
-                on_event=lambda event, data: sink.put({"event": event, "data": data}),
+                on_event=on_event,
             )
 
             _save_message(db, conversation_id, "user", result.user_text)
             _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
 
-            sink.put({"event": "done", "data": _done_payload(result)})
+            done = _done_payload(result)
+            pipeline_log.append(pipeline_log.build_record(
+                result, status=done["status"], username=username, role=role,
+                conversation_id=conversation_id, mode=req.mode, message=req.message,
+            ))
+            sink.put({"event": "done", "data": done if internal_ok else _patient_done_payload(done)})
         except Exception as exc:
             sink.put({"event": "error", "data": str(exc)})
         finally:
@@ -509,7 +533,8 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
 async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(get_current_user)):
     # Clinician mode gives case-level detail (dosing, differentials); patients
     # always get patient mode, whatever the client sends.
-    if user_role(current_user.username) == "patient":
+    role = user_role(current_user.username)
+    if role == "patient":
         req.mode = "patient"
     with Session(ENGINE) as db:
         if req.conversation_id:
@@ -538,7 +563,7 @@ async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(ge
             conversation_id = conv.id
 
     sink: "queue.Queue" = queue.Queue()
-    threading.Thread(target=_run_pipeline, args=(req, conversation_id, sink), daemon=True).start()
+    threading.Thread(target=_run_pipeline, args=(req, conversation_id, sink, current_user.username, role), daemon=True).start()
 
     async def event_generator():
         loop = asyncio.get_event_loop()
@@ -589,6 +614,13 @@ def update_defense_config(update: DefenseConfigUpdate, _: ApiUser = Depends(_req
     return {"status": "ok", "toggles": PIPELINE_CONFIG}
 
 
+@app.get("/api/admin/pipeline-log")
+def get_pipeline_log(limit: int = 100, after: Optional[str] = None, _: ApiUser = Depends(_require_admin)):
+    """Per-request stage-by-stage log, newest first; ``after`` returns only newer entries."""
+    from src.security import pipeline_log
+    return {"logs": pipeline_log.read(limit=max(1, min(limit, 500)), after=after)}
+
+
 @app.get("/api/admin/defense-log")
 def get_defense_log(limit: int = 100, _: ApiUser = Depends(_require_admin)):
     from src.config import DEFENSE_LOG_PATH
@@ -611,12 +643,20 @@ def get_defense_log(limit: int = 100, _: ApiUser = Depends(_require_admin)):
 
 from fastapi.responses import FileResponse
 
-# Mount static directory
+dist_dir = ROOT / "frontend" / "dist"
+
+# The legacy vanilla-JS console in static/ is served only when the React app is
+# not built; otherwise its URL sends people to the one MedLM interface.
 static_dir = ROOT / "static"
-if static_dir.exists():
+if dist_dir.exists():
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/static/{_path:path}", include_in_schema=False)
+    def legacy_static(_path: str):
+        return RedirectResponse("/")
+elif static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-dist_dir = ROOT / "frontend" / "dist"
 if dist_dir.exists():
     assets_dir = dist_dir / "assets"
     if assets_dir.exists():

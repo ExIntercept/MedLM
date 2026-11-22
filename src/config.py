@@ -92,6 +92,7 @@ DEFENSE_THRESHOLDS_PATH = ROOT / "src" / "security" / "thresholds.json"
 
 # JSONL log of every defense decision (one line per request).
 DEFENSE_LOG_PATH = DATA_DIR / "defense_log.jsonl"
+PIPELINE_LOG_PATH = DATA_DIR / "pipeline_log.jsonl"
 
 # Input size limits applied by the sanitizer.
 MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "6000"))

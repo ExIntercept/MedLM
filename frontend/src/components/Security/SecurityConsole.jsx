@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, ListChecks, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { getDefenseConfig, getDefenseLog, updateDefenseToggles } from "../../lib/api";
 import { TOGGLES, reasonLabels } from "../../lib/defense";
+import PipelineLog from "./PipelineLog";
 
 const ACTION_TONE = {
   BLOCK: "border-red-200 bg-red-50 text-red-700",
@@ -37,7 +38,7 @@ function Panel({ title, action, children }) {
   return (
     <section className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-[15px] font-semibold text-clinical-ink">{title}</h2>
+        {typeof title === "string" ? <h2 className="text-[15px] font-semibold text-clinical-ink">{title}</h2> : title}
         {action}
       </div>
       {children}
@@ -51,11 +52,13 @@ export default function SecurityConsole() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
+  const [view, setView] = useState("pipeline");
+  const [filter, setFilter] = useState("ALL");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, log] = await Promise.all([getDefenseConfig(), getDefenseLog(50)]);
+      const [cfg, log] = await Promise.all([getDefenseConfig(), getDefenseLog(100)]);
       setConfig(cfg);
       setLogs(log.logs || []);
       setError(null);
@@ -125,14 +128,49 @@ export default function SecurityConsole() {
           ))}
         </ul>
         <p className="mt-3 text-xs text-clinical-muted">
-          Prompt Guard model: <span className="font-semibold">{config?.prompt_guard_status}</span>
+          Injection classifier (Layer A): <span className="font-semibold">{config?.prompt_guard_status}</span>
         </p>
+        {config?.thresholds && (
+          <div className="mt-4 border-t border-slate-border pt-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-clinical-muted">Detection thresholds</h3>
+            <p className="mt-0.5 text-[11px] text-clinical-muted">
+              Calibrated values used for the reported results; read-only here so a demo cannot change them.
+            </p>
+            <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-xs">
+              {Object.entries(config.thresholds).map(([k, v]) => (
+                <div key={k} className="contents">
+                  <dt className="font-mono text-clinical-muted">{k}</dt>
+                  <dd className="text-right tabular-nums text-clinical-ink">{typeof v === "number" ? v : String(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </Panel>
 
       <Panel
-        title="Recent defense decisions"
+        title={
+          <div className="flex overflow-hidden rounded-lg border border-slate-border text-xs font-semibold">
+            {[
+              { key: "pipeline", label: "Live pipeline", Icon: Activity },
+              { key: "detector", label: "Detector log", Icon: ListChecks },
+            ].map(({ key, label, Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setView(key)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 transition",
+                  view === key ? "bg-clinical-teal text-white" : "bg-surface text-clinical-muted hover:bg-slate-bg"
+                )}
+              >
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+        }
         action={
-          <button
+          view === "detector" && <button
             type="button"
             onClick={load}
             className="flex items-center gap-1.5 rounded-lg border border-slate-border px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-bg"
@@ -142,11 +180,27 @@ export default function SecurityConsole() {
           </button>
         }
       >
+        {view === "pipeline" ? (
+          <PipelineLog />
+        ) : (
+        <>
+        <p className="mb-2 text-[11px] text-clinical-muted">
+          One row per message that reached the attack detectors, with each detector&apos;s score.
+        </p>
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
-          {["BLOCK", "FLAG", "ALLOW"].map((a) => (
-            <span key={a} className={cn("rounded-full border px-2.5 py-1 font-semibold", ACTION_TONE[a])}>
-              {a} · {counts[a] || 0}
-            </span>
+          {["ALL", "BLOCK", "FLAG", "ALLOW"].map((a) => (
+            <button
+              key={a}
+              type="button"
+              onClick={() => setFilter(a)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 font-semibold transition",
+                a === "ALL" ? "border-slate-border text-clinical-muted" : ACTION_TONE[a],
+                filter === a && "ring-2 ring-clinical-teal ring-offset-1 ring-offset-surface"
+              )}
+            >
+              {a === "ALL" ? `All · ${logs.length}` : `${a} · ${counts[a] || 0}`}
+            </button>
           ))}
         </div>
         {logs.length === 0 ? (
@@ -160,13 +214,15 @@ export default function SecurityConsole() {
                 <tr>
                   <th className="py-1.5 pr-2 font-semibold">Time</th>
                   <th className="py-1.5 pr-2 font-semibold">Decision</th>
+                  <th className="py-1.5 pr-2 font-semibold">Category</th>
+                  <th className="py-1.5 pr-2 font-semibold">Scores</th>
                   <th className="py-1.5 pr-2 font-semibold">Why</th>
                   <th className="py-1.5 pr-2 font-semibold">Message</th>
                   <th className="py-1.5 font-semibold">ms</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-border">
-                {logs.map((r, i) => (
+                {logs.filter((r) => filter === "ALL" || r.action === filter).map((r, i) => (
                   <tr key={i} className="align-top">
                     <td className="whitespace-nowrap py-1.5 pr-2 text-clinical-muted">
                       {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
@@ -176,8 +232,20 @@ export default function SecurityConsole() {
                         {r.action}
                       </span>
                     </td>
+                    <td className="py-1.5 pr-2 font-semibold text-clinical-muted">{r.category || "—"}</td>
+                    <td className="whitespace-nowrap py-1.5 pr-2 font-mono text-[11px] text-clinical-ink">
+                      {r.pg_score != null && <div>A {Number(r.pg_score).toFixed(2)}</div>}
+                      <div title={(r.top_templates || []).map((t) => t.family).join(", ")}>
+                        B {Number(r.tm_max_sim ?? 0).toFixed(2)}
+                        {r.top_templates?.[0]?.family && <span className="text-clinical-muted"> {r.top_templates[0].family}</span>}
+                      </div>
+                      {r.harm_score != null && <div>H {Number(r.harm_score).toFixed(2)}</div>}
+                    </td>
                     <td className="py-1.5 pr-2 text-clinical-ink">
                       {reasonLabels(r.reasons).join(", ") || "—"}
+                      {r.sanitize_notes?.length > 0 && (
+                        <div className="text-[11px] text-amber-700">Sanitized: {r.sanitize_notes.join(", ")}</div>
+                      )}
                     </td>
                     <td className="max-w-[320px] py-1.5 pr-2 text-clinical-ink">
                       <span className="line-clamp-2">{r.message_excerpt}</span>
@@ -188,6 +256,8 @@ export default function SecurityConsole() {
               </tbody>
             </table>
           </div>
+        )}
+        </>
         )}
       </Panel>
     </div>

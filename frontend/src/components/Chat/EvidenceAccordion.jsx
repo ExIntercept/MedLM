@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BookMarked, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-export default function EvidenceAccordion({ sources }) {
+export default function EvidenceAccordion({ sources, showScores = false }) {
   const [open, setOpen] = useState(false);
   if (!sources || sources.length === 0) return null;
 
@@ -25,8 +25,8 @@ export default function EvidenceAccordion({ sources }) {
             <li key={`${src.chunk_id}-${i}`} className="px-3 py-2.5 text-sm">
               <div className="font-medium text-clinical-ink">{src.title}</div>
               <div className="mt-0.5 text-xs text-clinical-muted">
-                {src.source || "Unknown Source"} · chunk {src.chunk_id}
-                {typeof src.score === "number" && ` · rerank score ${src.score.toFixed(3)}`}
+                {src.source || "Unknown Source"}{showScores && ` · chunk ${src.chunk_id}`}
+                {showScores && typeof src.score === "number" && ` · rerank score ${src.score.toFixed(3)}`}
               </div>
               {src.excerpt && (
                 <p className="mt-1.5 border-l-2 border-clinical-teal pl-2 text-xs text-slate-600">

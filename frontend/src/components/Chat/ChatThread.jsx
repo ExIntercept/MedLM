@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Stethoscope } from "lucide-react";
 import ChatMessage from "./ChatMessage";
 
-export default function ChatThread({ messages, isStreaming }) {
+export default function ChatThread({ messages, isStreaming, showInternals = false }) {
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = (behavior) => {
@@ -45,6 +45,7 @@ export default function ChatThread({ messages, isStreaming }) {
           sources={message.sources}
           audit={message.audit}
           triage={message.triage}
+          showInternals={showInternals}
           isStreaming={isStreaming && i === messages.length - 1 && message.role === "assistant"}
         />
       ))}

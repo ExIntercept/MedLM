@@ -54,3 +54,33 @@ export const TOGGLES = [
   { key: "layer_prompt_hardening", label: "Prompt hardening", hint: "Nonce-tagged delimiters and restated rules" },
   { key: "layer_output_guard", label: "Output guard", hint: "Llama Guard on the model's answer" },
 ];
+
+/** What each stage does, for the admin pipeline view. */
+export const STAGE_INFO = {
+  sanitize: "Strips invisible characters and model control tokens from the message and profile",
+  triage: "Escalates acute emergencies without calling the model",
+  guardrails: "Hard contraindication rules for dangerous drug requests",
+  detect: "Layers A (injection classifier), B (jailbreak templates), H (harmful intent), G (Llama Guard)",
+  retrieve: "Hybrid search over the medical guideline corpus",
+  harden: "Nonce-tagged prompt with restated rules; extra rules when the request was flagged",
+  generate: "The medical model writes an answer",
+  verify: "Checks each claim against the retrieved evidence; withholds unsupported answers",
+  output_guard: "Llama Guard judges the model's answer before it is shown",
+};
+
+/** Colour tone for a stage outcome: ok | warn | stop | off. */
+export function outcomeTone(outcome = "") {
+  const o = outcome.toLowerCase();
+  if (["block", "blocked", "intercepted", "emergency", "withheld"].includes(o)) return "stop";
+  if (["flag", "modified", "case_discussion", "unsafe_allowed", "flagged", "ungrounded"].includes(o)) return "warn";
+  if (["off", "skipped"].includes(o) || o.startsWith("0 passages")) return "off";
+  return "ok";
+}
+
+export const OUTCOME_LABEL = {
+  clean: "clean", modified: "sanitized", clear: "clear", emergency: "escalated",
+  case_discussion: "case discussion", intercepted: "intercepted", allow: "allowed",
+  flag: "flagged", block: "blocked", hardened: "hardened", answered: "answered",
+  pass: "grounded", flagged: "partly grounded", ungrounded: "ungrounded", withheld: "withheld",
+  safe: "safe", unsafe_allowed: "unsafe (non-blocking)", blocked: "blocked", off: "off", skipped: "skipped",
+};

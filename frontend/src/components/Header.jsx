@@ -28,6 +28,7 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
   const [health, setHealth] = useState(null);
 
   useEffect(() => {
+    if (role === "patient") return undefined;
     let alive = true;
     const load = () =>
       getHealth()
@@ -39,7 +40,7 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [role]);
 
   const known = health && !health.failed;
   const pill = (v) => (health === null ? null : known && !!v);
@@ -50,8 +51,11 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
         <div>
           <h1 className="text-[20px] font-bold tracking-tight text-clinical-ink">MedLM</h1>
           <p className="mt-0.5 text-sm text-clinical-muted">
-            Model-agnostic adversarial defense for medical language models: every answer passes nine safety stages.
+            {role === "patient"
+              ? "Your private health assistant. Answers are checked against medical guidelines."
+              : "Model-agnostic adversarial defense for medical language models: every answer passes nine safety stages."}
           </p>
+          {role !== "patient" && (
           <div className="mt-2 flex flex-wrap gap-2">
             <StatusPill label={known && health.model ? `Model · ${health.model.split("/").pop()}` : "Model"} ok={pill(health?.colab_medgemma)} />
             <StatusPill
@@ -62,6 +66,7 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
             <StatusPill label={known && health.guard_model ? `Guard · ${health.guard_model}` : "Llama Guard"} ok={pill(health?.guard_model)} />
             <StatusPill label="Output guard" ok={pill(health?.output_guard)} />
           </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button

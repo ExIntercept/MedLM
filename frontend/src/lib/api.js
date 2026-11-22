@@ -287,3 +287,10 @@ export function updateDefenseToggles(toggles) {
 export function getDefenseLog(limit = 50) {
   return adminJson(`/api/admin/defense-log?limit=${limit}`);
 }
+
+/** Per-request stage-by-stage pipeline log, newest first. `after` = newest id already shown. */
+export function getPipelineLog(limit = 100, after = null) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (after) q.set("after", after);
+  return adminJson(`/api/admin/pipeline-log?${q}`);
+}

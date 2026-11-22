@@ -104,7 +104,7 @@ function TriageBadge({ triage }) {
   );
 }
 
-export default function ChatMessage({ role, content, sources, audit, triage, isStreaming }) {
+export default function ChatMessage({ role, content, sources, audit, triage, isStreaming, showInternals = false }) {
   const isUser = role === "user";
   const isEmergency = triage?.level === "EMERGENCY";
   return (
@@ -144,8 +144,8 @@ export default function ChatMessage({ role, content, sources, audit, triage, isS
                 <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-clinical-teal" />
               </span>
             )}
-            <EvidenceAccordion sources={sources} />
-            <AuditBadge audit={audit} />
+            <EvidenceAccordion sources={sources} showScores={showInternals} />
+            {showInternals && <AuditBadge audit={audit} />}
           </>
         )}
       </div>

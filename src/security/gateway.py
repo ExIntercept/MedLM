@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -127,6 +128,23 @@ class GatewayResult:
     meta: dict = field(default_factory=dict)
     """Stage-specific metadata to persist with the assistant message."""
 
+    steps: list = field(default_factory=list)
+    """One record per stage, in order: ``{"stage", "outcome", "ms", "detail"}``.
+    Feeds the admin pipeline log; never shown to patients."""
+
+
+def _step(steps: list, stage: str, outcome: str, t0: float, **detail) -> None:
+    """Record what one stage did and how long it took."""
+    rec = {"stage": stage, "outcome": outcome, "ms": round((time.perf_counter() - t0) * 1000.0, 1)}
+    detail = {k: v for k, v in detail.items() if v not in (None, [], {}, "")}
+    if detail:
+        rec["detail"] = detail
+    steps.append(rec)
+
+
+def _excerpt(text: str, n: int = 300) -> str:
+    return text if len(text) <= n else text[:n] + "…"
+
 
 class ClinicalDefenseGateway:
     """Run the defense pipeline around an arbitrary LLM adapter."""
@@ -180,12 +198,22 @@ class ClinicalDefenseGateway:
         emit: EventSink = on_event or (lambda _e, _d: None)
         history = history or []
         trace: list[str] = []
+        steps: list[dict] = []
 
         # ── 1. Sanitize ────────────────────────────────────────────────
+        t0 = time.perf_counter()
         if self._on("layer_sanitize"):
             san = sanitize_user_inputs(message, profile)
             trace.append("sanitize")
+            notes = list(san.message.notes) + [
+                f"{k}:{n}" for k, f in san.profile.items() if f.modified for n in f.notes
+            ]
+            changed = san.message.modified or any(f.modified for f in san.profile.values())
+            _step(steps, "sanitize", "modified" if changed else "clean", t0, notes=notes,
+                  before=_excerpt(message) if san.message.modified else None,
+                  after=_excerpt(san.message.model_text) if san.message.modified else None)
         else:
+            _step(steps, "sanitize", "off", t0)
             san = SanitizedInputs(
                 message=SanitizedField(model_text=message, detector_text=message, modified=False, notes=[]),
                 profile={},
@@ -193,11 +221,17 @@ class ClinicalDefenseGateway:
         user_text = san.message.model_text
 
         # ── 2. Emergency triage ────────────────────────────────────────
+        t0 = time.perf_counter()
+        if not self._on("layer_triage"):
+            _step(steps, "triage", "off", t0)
         if self._on("layer_triage"):
             from src.agents.emergency_triage import EMERGENCY_WARNING, triage
 
             trace.append("triage")
             category, escalate = triage(user_text, mode=mode)
+            _step(steps, "triage",
+                  "emergency" if category and escalate else "case_discussion" if category else "clear",
+                  t0, category=category)
             if category and not escalate:
                 # Red flags inside a case discussion or exam question: answer it.
                 trace.append("triage_case_discussion")
@@ -213,14 +247,20 @@ class ClinicalDefenseGateway:
                     trace=trace,
                     sanitized=san,
                     meta={"emergency_triage": category},
+                    steps=steps,
                 )
 
         # ── 3. Contraindication guardrails ─────────────────────────────
+        t0 = time.perf_counter()
+        if not self._on("layer_guardrails"):
+            _step(steps, "guardrails", "off", t0)
         if self._on("layer_guardrails"):
             from src.agents.guardrails import check_hard_rules, format_guardrail_intercept
 
             trace.append("guardrails")
             hit = check_hard_rules(user_text)
+            _step(steps, "guardrails", "intercepted" if hit else "clear", t0,
+                  rule=hit[0] if hit else None)
             if hit:
                 entity, _, warning = hit
                 text = format_guardrail_intercept(entity, warning, mode=mode)
@@ -233,11 +273,15 @@ class ClinicalDefenseGateway:
                     trace=trace,
                     sanitized=san,
                     meta={"guardrail_intercept": True},
+                    steps=steps,
                 )
 
         # ── 4. Adversarial detection ───────────────────────────────────
         decision = None
         flagged = False
+        t0 = time.perf_counter()
+        if not self._on("defense_enabled"):
+            _step(steps, "detect", "off", t0)
         if self._on("defense_enabled"):
             from src.security.decision import run_input_defenses
             from src.security.logging import log_decision
@@ -254,6 +298,17 @@ class ClinicalDefenseGateway:
             )
             if self.log_decisions:
                 log_decision(decision, conversation_id, None, san.message.detector_text)
+            _step(steps, "detect", decision.action.lower(), t0,
+                  category=decision.category, reasons=list(decision.reasons or []),
+                  pg_score=decision.pg_score, tm_max_sim=round(decision.tm_max_sim, 4),
+                  tm_n_components=decision.tm_n_components, harm_score=decision.harm_score,
+                  guard_unsafe=decision.guard_unsafe, guard_categories=decision.guard_categories,
+                  top_templates=[{"family": t.get("family"), "sim": t.get("sim")}
+                                 for t in (decision.top_templates or [])[:3]],
+                  layer_ms=decision.latency_ms,
+                  disabled=[k for k in ("layer_prompt_guard", "layer_template_matcher",
+                                        "layer_harm_classifier", "layer_llama_guard")
+                            if not self._on(k)])
 
             if decision.action == "BLOCK":
                 refusal = HARMFUL_REQUEST_MESSAGE if decision.category == "HARMFUL_REQUEST" else BLOCK_MESSAGE
@@ -274,6 +329,7 @@ class ClinicalDefenseGateway:
                         "n_components": decision.tm_n_components,
                         "harm": decision.harm_score,
                     },
+                    steps=steps,
                 )
             if decision.action == "FLAG":
                 emit("security_status", {"action": "FLAG"})
@@ -287,6 +343,7 @@ class ClinicalDefenseGateway:
             trace=trace,
             flagged=flagged,
             sanitized=san,
+            steps=steps,
         )
 
     def run(
@@ -321,6 +378,7 @@ class ClinicalDefenseGateway:
         decision = screened.decision
         flagged = screened.flagged
         trace = list(screened.trace)
+        steps = list(screened.steps)
 
         from src.agents.intake_extraction import extract_intake_fields
 
@@ -333,15 +391,21 @@ class ClinicalDefenseGateway:
 
         vignette_text, detected_options = parse_embedded_options(user_text)
         evidence: Evidence = []
+        t0 = time.perf_counter()
         if self.retriever is not None:
             trace.append("retrieve")
             evidence = list(self.retriever(vignette_text) or [])
+            _step(steps, "retrieve", f"{len(evidence)} passages", t0,
+                  titles=[(m or {}).get("title", "Guideline") for _, _, m in evidence])
+        else:
+            _step(steps, "retrieve", "off", t0)
 
         # ── 6. Prompt hardening, fitted to this model's context window ─
         from src.agents.prompting import format_patient_profile
 
         hardened = self._on("layer_prompt_hardening")
         trace.append("harden" if hardened else "prompt")
+        t_harden = time.perf_counter()
         profile_note = format_patient_profile(
             **{k: (san.profile[k].model_text if k in san.profile else None)
                for k in ("age", "sex", "duration", "conditions", "medications")}
@@ -369,6 +433,9 @@ class ClinicalDefenseGateway:
         )
         if fit_notes:
             trace.append("fit_context")
+        _step(steps, "harden", "hardened" if hardened else "off", t_harden,
+              extra_safety_rules=bool(flagged and hardened) or None,
+              context_fit=fit_notes or None)
 
         sources = [
             {
@@ -384,15 +451,19 @@ class ClinicalDefenseGateway:
 
         # ── 7. Generate (the only model-specific step) ─────────────────
         trace.append("generate")
+        t0 = time.perf_counter()
         raw_answer = "".join(
             self.llm.stream(messages, temperature=self.temperature, max_tokens=max_tokens)
         )
+        _step(steps, "generate", "answered", t0,
+              model=getattr(self.llm, "name", type(self.llm).__name__), chars=len(raw_answer))
 
         # ── 8. Output normalisation, verification and gate ─────────────
         from src.agents.prompting import sanitize_patient_output
         from src.agents.verifier import verify_evidence
 
         trace.append("verify")
+        t0 = time.perf_counter()
         answer = sanitize_patient_output(clean_model_output(raw_answer, model_profile))
         # Options were split off the vignette; naming one restates the question.
         audit = verify_evidence(answer, evidence, vignette_text, options=detected_options)
@@ -401,11 +472,14 @@ class ClinicalDefenseGateway:
         if withheld:
             answer = WITHHELD_MESSAGE
             emit("verification_status", {"status": "FLAGGED"})
+        _step(steps, "verify", "withheld" if withheld else str(audit["status"]).lower(), t0,
+              score=audit.get("score"), withheld_draft=_excerpt(draft_text) if withheld else None)
 
         # ── 9. Output guard: grounding measures evidence support, not harm.
         # An answer that reuses the question's own words can be fully
         # "grounded" and still unsafe, so Llama Guard also judges the answer.
         output_guard = None
+        t0 = time.perf_counter()
         if not withheld and self._on("defense_enabled") and self._on("layer_output_guard"):
             output_guard = _check_output(user_text, answer)
             if output_guard is not None:
@@ -414,6 +488,13 @@ class ClinicalDefenseGateway:
                     answer = OUTPUT_BLOCKED_MESSAGE
                     emit("security_status", {"action": "BLOCK", "category": "UNSAFE_OUTPUT"})
         output_blocked = bool(output_guard is not None and output_guard.blocks)
+        if output_guard is not None:
+            _step(steps, "output_guard",
+                  "blocked" if output_blocked else "unsafe_allowed" if output_guard.unsafe else "safe",
+                  t0, categories=output_guard.categories,
+                  blocked_answer=_excerpt(draft_text) if output_blocked else None)
+        else:
+            _step(steps, "output_guard", "skipped" if withheld else "off", t0)
         emit("token", answer)
 
         return GatewayResult(
@@ -428,6 +509,7 @@ class ClinicalDefenseGateway:
             output_blocked=output_blocked,
             model=getattr(self.llm, "name", type(self.llm).__name__),
             trace=trace,
+            steps=steps,
             meta={
                 "faithfulness_score": audit["score"],
                 "status": audit["status"],
