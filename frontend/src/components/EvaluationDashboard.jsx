@@ -146,7 +146,7 @@ function ClinicalQABenchmark() {
             <button
               type="button"
               onClick={handleExport}
-              className="flex items-center gap-1.5 rounded-lg bg-clinical-teal px-3 py-2 text-sm font-semibold text-white transition hover:bg-clinical-teal-dark"
+              className="flex items-center gap-1.5 rounded-lg bg-clinical-teal px-3 py-2 text-sm font-semibold text-white transition hover:bg-clinical-teal-hover"
             >
               <Download size={14} />
               Export

@@ -107,7 +107,7 @@ export default function EvidenceExplorer({ mode = "clinician" }) {
         <button
           type="button"
           onClick={runSearch}
-          className="flex items-center gap-1.5 rounded-lg bg-clinical-teal px-4 py-2 text-sm font-semibold text-white transition hover:bg-clinical-teal-dark"
+          className="flex items-center gap-1.5 rounded-lg bg-clinical-teal px-4 py-2 text-sm font-semibold text-white transition hover:bg-clinical-teal-hover"
         >
           <Search size={14} />
           Search

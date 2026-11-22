@@ -4,21 +4,29 @@
 
 /* Theme colours (space-separated RGB, used by tailwind.config.js). */
 :root {
+  /* Warm, slightly sage neutrals with a calm teal accent. */
   --c-surface: 255 255 255;
-  --c-bg: 248 250 252;
-  --c-border: 226 232 240;
-  --c-ink: 15 23 42;
-  --c-muted: 100 116 139;
-  --c-teal-tint: 240 253 250;
+  --c-bg: 245 247 245;
+  --c-border: 225 230 227;
+  --c-ink: 24 36 34;
+  --c-muted: 104 117 114;
+  --c-teal: 15 128 116;
+  --c-teal-hover: 12 104 95;
+  --c-teal-text: 13 98 90;
+  --c-teal-tint: 232 245 242;
   color-scheme: light;
 }
 .dark {
-  --c-surface: 17 24 39;
-  --c-bg: 3 7 18;
-  --c-border: 41 51 66;
-  --c-ink: 226 232 240;
-  --c-muted: 148 163 184;
-  --c-teal-tint: 19 52 50;
+  /* Soft charcoal with a hint of green, not pure black. */
+  --c-surface: 24 30 32;
+  --c-bg: 16 20 22;
+  --c-border: 44 53 56;
+  --c-ink: 228 234 232;
+  --c-muted: 146 160 157;
+  --c-teal: 22 140 127;
+  --c-teal-hover: 26 158 143;
+  --c-teal-text: 110 214 196;
+  --c-teal-tint: 22 50 48;
   color-scheme: dark;
 }
 
@@ -31,8 +39,8 @@ body {
 }
 
 ::selection {
-  background: #ccfbf1;
-  color: #0f172a;
+  background: #c9ece5;
+  color: #182422;
 }
 .dark ::selection {
   background: #115e59;
@@ -41,21 +49,21 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: #cdd6d2 transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1;
+  background-color: #cdd6d2;
   border-radius: 999px;
 }
 .dark * {
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: #3a4548 transparent;
 }
 .dark *::-webkit-scrollbar-thumb {
-  background-color: #334155;
+  background-color: #3a4548;
 }
 
 @layer utilities {
@@ -76,9 +84,9 @@ body {
 .dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.45); }
 .dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.32); }
 .dark .bg-sky-50 { background-color: rgb(12 74 110 / 0.32); }
-.dark .bg-slate-100 { background-color: rgb(30 41 59); }
-.dark .bg-slate-200 { background-color: rgb(51 65 85); }
-.dark .bg-slate-300 { background-color: rgb(71 85 105); }
+.dark .bg-slate-100 { background-color: rgb(34 42 45); }
+.dark .bg-slate-200 { background-color: rgb(48 58 61); }
+.dark .bg-slate-300 { background-color: rgb(66 78 81); }
 .dark .border-red-200, .dark .border-red-300 { border-color: rgb(153 27 27 / 0.7); }
 .dark .border-amber-200 { border-color: rgb(146 64 14 / 0.7); }
 .dark .border-emerald-200 { border-color: rgb(6 95 70 / 0.7); }

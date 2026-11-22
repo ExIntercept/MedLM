@@ -1,15 +1,100 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, ListChecks, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, ChevronDown, ListChecks, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { relativeTime } from "../Sidebar/ConsultationHistory";
 import { cn } from "../../lib/cn";
 import { getDefenseConfig, getDefenseLog, updateDefenseToggles } from "../../lib/api";
 import { TOGGLES, reasonLabels } from "../../lib/defense";
 import PipelineLog from "./PipelineLog";
 
-const ACTION_TONE = {
-  BLOCK: "border-red-200 bg-red-50 text-red-700",
-  FLAG: "border-amber-200 bg-amber-50 text-amber-700",
-  ALLOW: "border-emerald-200 bg-emerald-50 text-emerald-700",
-};
+const ACTION_DOT = { BLOCK: "bg-red-500", FLAG: "bg-amber-500", ALLOW: "bg-emerald-500" };
+const ACTION_TEXT = { BLOCK: "text-red-700", FLAG: "text-amber-700", ALLOW: "text-emerald-700" };
+const ACTION_LABEL = { BLOCK: "Blocked", FLAG: "Flagged", ALLOW: "Allowed" };
+
+function titleCase(s) {
+  return s ? s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ") : "";
+}
+
+/** A tiny labelled bar: one detector's score from 0 to 1. */
+function ScoreBar({ label, value }) {
+  if (value == null) return null;
+  const v = Math.max(0, Math.min(1, Number(value)));
+  const tone = v >= 0.8 ? "bg-red-500" : v >= 0.5 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div className="flex items-center gap-1.5" title={`${label} ${v.toFixed(2)}`}>
+      <span className="w-2.5 text-[10px] font-semibold text-clinical-muted">{label}</span>
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-bg">
+        <span className={cn("block h-full rounded-full", tone)} style={{ width: `${v * 100}%` }} />
+      </span>
+      <span className="w-7 font-mono text-[10px] text-clinical-muted">{v.toFixed(2)}</span>
+    </div>
+  );
+}
+
+function DetectorRow({ r }) {
+  const [open, setOpen] = useState(false);
+  const why = reasonLabels(r.reasons);
+  const when = r.timestamp ? new Date(r.timestamp) : null;
+  return (
+    <div className={cn("transition", open ? "bg-slate-bg/60" : "hover:bg-slate-bg/60")}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", ACTION_DOT[r.action])} />
+        <span className={cn("w-16 shrink-0 text-xs font-semibold", ACTION_TEXT[r.action])}>
+          {ACTION_LABEL[r.action] || r.action}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-clinical-ink">{r.message_excerpt || "—"}</span>
+          <span className="block truncate text-[11px] text-clinical-muted">
+            {[titleCase(r.category), why[0], why.length > 1 ? `+${why.length - 1} more` : null]
+              .filter(Boolean)
+              .join(" · ") || "No detector fired"}
+          </span>
+        </span>
+        <span className="hidden shrink-0 space-y-0.5 lg:block">
+          <ScoreBar label="A" value={r.pg_score} />
+          <ScoreBar label="B" value={r.tm_max_sim ?? 0} />
+        </span>
+        <span
+          className="w-16 shrink-0 text-right text-[11px] text-clinical-muted"
+          title={when ? when.toLocaleString() : ""}
+        >
+          {when ? relativeTime(r.timestamp) : "—"}
+        </span>
+        <ChevronDown size={14} className={cn("shrink-0 text-clinical-muted transition", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="grid gap-4 px-3 pb-3 pl-8 text-xs sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-clinical-muted">Message</div>
+            <p className="whitespace-pre-wrap break-words text-clinical-ink">{r.message_excerpt}</p>
+            {r.sanitize_notes?.length > 0 && (
+              <p className="text-amber-700">Cleaned before checking: {r.sanitize_notes.join(", ")}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-clinical-muted">Detectors</div>
+            <ScoreBar label="A" value={r.pg_score} />
+            <ScoreBar label="B" value={r.tm_max_sim ?? 0} />
+            <ScoreBar label="H" value={r.harm_score} />
+            {r.top_templates?.length > 0 && (
+              <p className="text-clinical-muted">
+                Closest jailbreak templates: {[...new Set(r.top_templates.map((t) => t.family).filter(Boolean))].join(", ")}
+              </p>
+            )}
+            {why.length > 0 && <p className="text-clinical-ink">Why: {why.join(", ")}</p>}
+            <p className="text-clinical-muted">
+              {when ? when.toLocaleString() : ""} · {Math.round(r.latency_ms?.total ?? 0)} ms
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Switch({ checked, onChange, disabled }) {
   return (
@@ -36,7 +121,7 @@ function Switch({ checked, onChange, disabled }) {
 
 function Panel({ title, action, children }) {
   return (
-    <section className="rounded-xl border border-slate-border bg-surface p-4 shadow-card">
+    <section className="min-w-0 rounded-xl border border-slate-border bg-surface p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between gap-2">
         {typeof title === "string" ? <h2 className="text-[15px] font-semibold text-clinical-ink">{title}</h2> : title}
         {action}
@@ -106,7 +191,7 @@ export default function SecurityConsole({ hidePipeline = false }) {
   const counts = logs.reduce((acc, r) => ({ ...acc, [r.action]: (acc[r.action] || 0) + 1 }), {});
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
       <Panel
         title="Defense layers"
         action={<span className="text-xs text-clinical-muted">Changes apply to the next message</span>}
@@ -184,77 +269,40 @@ export default function SecurityConsole({ hidePipeline = false }) {
           <PipelineLog />
         ) : (
         <>
-        <p className="mb-2 text-[11px] text-clinical-muted">
-          One row per message that reached the attack detectors, with each detector&apos;s score.
-        </p>
-        <div className="mb-3 flex flex-wrap gap-2 text-xs">
-          {["ALL", "BLOCK", "FLAG", "ALLOW"].map((a) => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => setFilter(a)}
-              className={cn(
-                "rounded-full border px-2.5 py-1 font-semibold transition",
-                a === "ALL" ? "border-slate-border text-clinical-muted" : ACTION_TONE[a],
-                filter === a && "ring-2 ring-clinical-teal ring-offset-1 ring-offset-surface"
-              )}
-            >
-              {a === "ALL" ? `All · ${logs.length}` : `${a} · ${counts[a] || 0}`}
-            </button>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex rounded-lg bg-slate-bg p-0.5 text-xs">
+            {["ALL", "BLOCK", "FLAG", "ALLOW"].map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setFilter(a)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition",
+                  filter === a ? "bg-surface text-clinical-ink shadow-card" : "text-clinical-muted hover:text-clinical-ink"
+                )}
+              >
+                {a !== "ALL" && <span className={cn("h-1.5 w-1.5 rounded-full", ACTION_DOT[a])} />}
+                {a === "ALL" ? "All" : ACTION_LABEL[a]}
+                <span className="text-clinical-muted">{a === "ALL" ? logs.length : counts[a] || 0}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-clinical-muted">
+            Scores: <b className="font-medium">A</b> injection · <b className="font-medium">B</b> jailbreak template ·{" "}
+            <b className="font-medium">H</b> harmful intent
+          </p>
         </div>
         {logs.length === 0 ? (
           <p className="flex items-center gap-2 text-sm text-clinical-muted">
             <ShieldCheck size={15} /> No decisions logged yet.
           </p>
         ) : (
-          <div className="max-h-[60vh] overflow-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-surface text-clinical-muted">
-                <tr>
-                  <th className="py-1.5 pr-2 font-semibold">Time</th>
-                  <th className="py-1.5 pr-2 font-semibold">Decision</th>
-                  <th className="py-1.5 pr-2 font-semibold">Category</th>
-                  <th className="py-1.5 pr-2 font-semibold">Scores</th>
-                  <th className="py-1.5 pr-2 font-semibold">Why</th>
-                  <th className="py-1.5 pr-2 font-semibold">Message</th>
-                  <th className="py-1.5 font-semibold">ms</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-border">
-                {logs.filter((r) => filter === "ALL" || r.action === filter).map((r, i) => (
-                  <tr key={i} className="align-top">
-                    <td className="whitespace-nowrap py-1.5 pr-2 text-clinical-muted">
-                      {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <span className={cn("rounded-full border px-2 py-0.5 font-semibold", ACTION_TONE[r.action])}>
-                        {r.action}
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-2 font-semibold text-clinical-muted">{r.category || "—"}</td>
-                    <td className="whitespace-nowrap py-1.5 pr-2 font-mono text-[11px] text-clinical-ink">
-                      {r.pg_score != null && <div>A {Number(r.pg_score).toFixed(2)}</div>}
-                      <div title={(r.top_templates || []).map((t) => t.family).join(", ")}>
-                        B {Number(r.tm_max_sim ?? 0).toFixed(2)}
-                        {r.top_templates?.[0]?.family && <span className="text-clinical-muted"> {r.top_templates[0].family}</span>}
-                      </div>
-                      {r.harm_score != null && <div>H {Number(r.harm_score).toFixed(2)}</div>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-clinical-ink">
-                      {reasonLabels(r.reasons).join(", ") || "—"}
-                      {r.sanitize_notes?.length > 0 && (
-                        <div className="text-[11px] text-amber-700">Sanitized: {r.sanitize_notes.join(", ")}</div>
-                      )}
-                    </td>
-                    <td className="max-w-[320px] py-1.5 pr-2 text-clinical-ink">
-                      <span className="line-clamp-2">{r.message_excerpt}</span>
-                    </td>
-                    <td className="py-1.5 text-clinical-muted">{Math.round(r.latency_ms?.total ?? 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="max-h-[65vh] divide-y divide-slate-border overflow-auto rounded-lg border border-slate-border">
+            {logs
+              .filter((r) => filter === "ALL" || r.action === filter)
+              .map((r, i) => (
+                <DetectorRow key={r.timestamp ? `${r.timestamp}-${i}` : i} r={r} />
+              ))}
           </div>
         )}
         </>

@@ -123,7 +123,7 @@ export default function LoginPage() {
               type="submit"
               disabled={submitting}
               className={cn(
-                "flex w-full items-center justify-center gap-2 rounded-lg bg-clinical-teal px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-clinical-teal-dark",
+                "flex w-full items-center justify-center gap-2 rounded-lg bg-clinical-teal px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-clinical-teal-hover",
                 submitting && "cursor-not-allowed opacity-70"
               )}
             >

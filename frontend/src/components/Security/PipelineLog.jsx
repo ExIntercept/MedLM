@@ -228,6 +228,22 @@ export default function PipelineLog({ showMap = true }) {
   const [open, setOpen] = useState(null);
   const [fresh, setFresh] = useState(() => new Set());
   const [stage, setStage] = useState(null);
+  const [mapOpen, setMapOpen] = useState(() => {
+    try {
+      return localStorage.getItem("medlm.pipelineMap") !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggleMap = () =>
+    setMapOpen((v) => {
+      try {
+        localStorage.setItem("medlm.pipelineMap", v ? "closed" : "open");
+      } catch {
+        /* storage unavailable */
+      }
+      return !v;
+    });
   const newest = useRef(null);
 
   const poll = useCallback(async () => {
@@ -299,17 +315,18 @@ export default function PipelineLog({ showMap = true }) {
 
       {showMap && logs.length > 0 && (
         <div className="mb-4 rounded-lg border border-slate-border p-2">
-          <div className="mb-1 flex items-center justify-between px-1 text-xs">
-            <span className="font-semibold text-clinical-ink">
+          <div className="flex items-center justify-between px-1 text-xs">
+            <button type="button" onClick={toggleMap} className="flex items-center gap-1 font-semibold text-clinical-ink">
+              <ChevronRight size={13} className={cn("transition-transform", mapOpen && "rotate-90")} />
               Where requests went · last {logs.length}
-            </span>
+            </button>
             {stage && (
               <button type="button" onClick={() => setStage(null)} className="font-semibold text-clinical-teal-dark hover:underline">
                 Clear stage filter ({stage})
               </button>
             )}
           </div>
-          <FlowMap logs={logs} onSelect={setStage} selected={stage} />
+          {mapOpen && <FlowMap logs={logs} onSelect={setStage} selected={stage} className="mt-1" />}
         </div>
       )}
 

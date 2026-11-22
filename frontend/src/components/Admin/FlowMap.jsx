@@ -39,21 +39,14 @@ const EDGES = [
 ];
 const MAIN_ORDER = ["sanitize", "triage", "guardrails", "detect", "retrieve", "harden", "generate", "verify", "output_guard"];
 
+// One class set for both themes; dark: variants follow the theme toggle live.
 const FILL = {
-  stop: "fill-red-500/90 stroke-red-300",
-  warn: "fill-amber-900/40 stroke-amber-500",
-  ok: "fill-emerald-900/30 stroke-emerald-500",
-  off: "fill-violet-900/30 stroke-violet-400",
-  none: "fill-transparent stroke-slate-300",
-  neutral: "fill-transparent stroke-slate-400",
-};
-const LIGHT_FILL = {
-  stop: "fill-red-500 stroke-red-600",
-  warn: "fill-amber-100 stroke-amber-500",
-  ok: "fill-emerald-50 stroke-emerald-500",
-  off: "fill-violet-50 stroke-violet-400",
-  none: "fill-transparent stroke-slate-300",
-  neutral: "fill-surface stroke-slate-400",
+  stop: "fill-red-500 stroke-red-600 dark:fill-red-500/90 dark:stroke-red-300",
+  warn: "fill-amber-100 stroke-amber-500 dark:fill-amber-900/40",
+  ok: "fill-emerald-50 stroke-emerald-500 dark:fill-emerald-900/30",
+  off: "fill-violet-50 stroke-violet-400 dark:fill-violet-900/30",
+  none: "fill-transparent stroke-slate-300 dark:stroke-slate-600",
+  neutral: "fill-surface stroke-slate-400 dark:fill-transparent",
 };
 
 function edgePath(a, b) {
@@ -165,8 +158,7 @@ export default function FlowMap({ rec, logs, onSelect, selected, className }) {
   const { states, stoppedAt } = aggregate ? { ...aggregateStates(logs), stoppedAt: null } : requestStates(rec);
   const traffic = aggregate ? aggregateStates(logs).traffic : null;
   const maxTraffic = aggregate ? Math.max(1, ...Object.values(traffic)) : 1;
-  const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-  const fills = dark ? FILL : LIGHT_FILL;
+  const fills = FILL;
 
   const edgeState = (a, b) => {
     if (aggregate) {

@@ -126,7 +126,7 @@ function Workspace() {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 md:p-6">
+    <div className="flex min-h-screen flex-col">
       <Header
         username={user?.username || "User"}
         role={role}
@@ -137,68 +137,82 @@ function Workspace() {
         onToggleTheme={toggleTheme}
       />
 
-      {visibleTab === "consultation" && (
-        <div className="flex flex-1 flex-col gap-4 md:flex-row">
-          <Sidebar
-            profile={profile}
-            onProfileChange={handleProfileChange}
-            isPatient={isPatient}
-            recentlyUpdated={recentlyUpdated}
-            sessions={conversations}
-            activeSessionId={conversationId}
-            onSelectSession={handleSelectConversation}
-            onNewConsultation={handleNewConsultation}
-          />
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-5 md:px-6">
+        {visibleTab === "consultation" && (
+          <div className="flex flex-1 flex-col gap-4 md:flex-row">
+            <Sidebar
+              profile={profile}
+              onProfileChange={handleProfileChange}
+              isPatient={isPatient}
+              recentlyUpdated={recentlyUpdated}
+              sessions={conversations}
+              activeSessionId={conversationId}
+              onSelectSession={handleSelectConversation}
+              onNewConsultation={handleNewConsultation}
+            />
 
-          <main className="flex min-h-[70vh] flex-1 flex-col rounded-xl border border-slate-border bg-surface p-4 shadow-card">
-            <div className="mb-3 flex items-center justify-between border-b border-slate-border pb-3">
-              <h2 className="text-[15px] font-semibold text-clinical-ink">Consultation</h2>
+            <main className="flex h-[calc(100vh-7.5rem)] min-h-[480px] flex-1 flex-col rounded-xl border border-slate-border bg-surface px-3 pb-3 pt-2 md:px-5">
               {isClinician && (
-              <div className="flex overflow-hidden rounded-lg border border-slate-border text-xs font-semibold">
-                {[
-                  { key: "patient", label: "Patient" },
-                  { key: "clinician", label: "Clinician" },
-                ].map((opt) => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setMode(opt.key)}
-                    className={cn(
-                      "px-3 py-1.5 transition",
-                      mode === opt.key
-                        ? "bg-clinical-teal text-white"
-                        : "bg-surface text-clinical-muted hover:bg-slate-bg"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+                <div className="flex items-center justify-end gap-2 pt-1 text-xs text-clinical-muted">
+                  Answer style
+                  <div className="flex rounded-lg bg-slate-bg p-0.5 font-medium">
+                    {[
+                      { key: "patient", label: "Plain language" },
+                      { key: "clinician", label: "Clinical" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setMode(opt.key)}
+                        className={cn(
+                          "rounded-md px-2.5 py-1 transition",
+                          mode === opt.key ? "bg-surface text-clinical-ink shadow-card" : "text-clinical-muted hover:text-clinical-ink"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
-            </div>
 
-            <ChatThread messages={messages} isStreaming={isStreaming} showInternals={isClinician} />
+              <ChatThread
+                messages={messages}
+                isStreaming={isStreaming}
+                showInternals={isClinician}
+                mode={isPatient ? "patient" : "clinician"}
+                onPick={handleSend}
+              />
 
-            {error && (
-              <p className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {error}
-              </p>
-            )}
+              {error && (
+                <p className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+              )}
 
-            <div className="mt-3">
-              <ChatInput onSend={handleSend} onStop={stop} disabled={isStreaming} isStreaming={isStreaming} />
-            </div>
-          </main>
-        </div>
-      )}
+              <div className="mx-auto w-full max-w-3xl">
+                <ChatInput
+                  onSend={handleSend}
+                  onStop={stop}
+                  disabled={isStreaming}
+                  isStreaming={isStreaming}
+                  placeholder={isPatient ? "Describe how you're feeling, or ask a question…" : "Ask a clinical question or describe a case…"}
+                />
+              </div>
+            </main>
+          </div>
+        )}
 
-      {visibleTab === "records" && (
-        <MedicalRecords sessions={conversations} isPatient={isPatient} onRecordSaved={(p) => setProfile((prev) => normalizeProfile({ ...p, duration: prev.duration }))} />
-      )}
-      {visibleTab === "prescriptions" && <Prescriptions profile={profile} />}
-      {visibleTab === "evidence" && <EvidenceExplorer mode={chatMode} />}
-      {visibleTab === "evaluation" && <EvaluationDashboard />}
-      {visibleTab === "security" && <AdminConsole />}
+        {visibleTab === "records" && (
+          <MedicalRecords
+            sessions={conversations}
+            isPatient={isPatient}
+            onRecordSaved={(p) => setProfile((prev) => normalizeProfile({ ...p, duration: prev.duration }))}
+          />
+        )}
+        {visibleTab === "prescriptions" && <Prescriptions profile={profile} />}
+        {visibleTab === "evidence" && <EvidenceExplorer mode={chatMode} />}
+        {visibleTab === "evaluation" && <EvaluationDashboard />}
+        {visibleTab === "security" && <AdminConsole />}
+      </div>
     </div>
   );
 }

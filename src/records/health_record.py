@@ -153,6 +153,7 @@ _DRUG_WITH_DOSE = re.compile(rf"\b(?:{_DRUG_NAMES}|{_DRUG_SUFFIX})\b{_DOSE}", re
 _CURRENT_MED_CUE = re.compile(
     r"\bI\s+(?:take|use|am\s+taking|'m\s+taking|am\s+on|'m\s+on|have\s+been\s+taking|'ve\s+been\s+taking|"
     r"have\s+been\s+on|'ve\s+been\s+on|was\s+prescribed|got\s+prescribed|still\s+take)\b|"
+    r"\bI(?:'m|\s+am)\s+\d{1,3}(?:\s+years?\s+old)?\s+and\s+(?:also\s+)?take\b|"
     r"\b(?:currently\s+(?:taking|on)|taking|prescribed|my\s+(?:medications?|meds|tablets|pills)\s+(?:are|is|include))\b|"
     r"\b(?:on|with)\s+(?=(?:" + _DRUG_NAMES + r"|" + _DRUG_SUFFIX + r")\b)",
     re.IGNORECASE,

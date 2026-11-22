@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ShieldAlert, ShieldCheck, Siren, Stethoscope, UserRound } from "lucide-react";
+import { ChevronDown, ShieldAlert, ShieldCheck, Siren, Stethoscope } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Markdown } from "../../lib/markdown";
 import { STAGES, guardCategoryLabels, reasonLabels } from "../../lib/defense";
@@ -108,35 +108,32 @@ export default function ChatMessage({ role, content, sources, audit, triage, isS
   const isUser = role === "user";
   const isEmergency = triage?.level === "EMERGENCY";
   return (
-    <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
+    <div className={cn("flex gap-3", isUser && "justify-end")}>
+      {!isUser && (
+        <div
+          className={cn(
+            "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+            isEmergency ? "bg-red-100 text-red-600" : "bg-clinical-teal-tint text-clinical-teal-dark"
+          )}
+        >
+          {isEmergency ? <Siren size={15} /> : <Stethoscope size={15} />}
+        </div>
+      )}
       <div
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
           isUser
-            ? "bg-clinical-ink text-surface"
+            ? "max-w-[80%] rounded-2xl rounded-br-md bg-clinical-teal-tint px-4 py-2.5 text-clinical-ink"
             : isEmergency
-            ? "bg-red-100 text-red-600"
-            : "bg-clinical-teal-tint text-clinical-teal-dark"
-        )}
-      >
-        {isUser ? <UserRound size={16} /> : isEmergency ? <Siren size={16} /> : <Stethoscope size={16} />}
-      </div>
-      <div
-        className={cn(
-          "max-w-[75%] rounded-xl border px-4 py-3 shadow-card",
-          isUser
-            ? "border-clinical-ink bg-clinical-ink text-surface"
-            : isEmergency
-            ? "border-red-300 bg-red-50 text-clinical-ink"
-            : "border-slate-border bg-surface text-clinical-ink"
+            ? "min-w-0 flex-1 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-clinical-ink"
+            : "min-w-0 flex-1 pt-0.5 text-clinical-ink"
         )}
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>
+          <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{content}</p>
         ) : (
           <>
             <TriageBadge triage={triage} />
-            <Markdown text={content} className="text-sm" />
+            <Markdown text={content} className="text-[15px] leading-relaxed" />
             {isStreaming && content === "" && (
               <span className="inline-flex gap-1 py-1">
                 <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-clinical-teal [animation-delay:-0.2s]" />

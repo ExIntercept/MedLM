@@ -77,3 +77,11 @@ def test_profile_prompt_unchanged_without_new_fields():
         "Patient Profile: The patient is 40 years old; current medications: metformin."
     )
     assert "allergies: penicillin" in format_patient_profile(allergies="penicillin")
+
+
+def test_age_then_and_take_counts_as_current_medication():
+    facts = extract_health_facts("I'm 58 and take warfarin. Is it safe to take ibuprofen for knee pain?")
+    assert facts["age"] == "58"
+    assert facts["medications"] == ["warfarin"]
+    # A question about taking something is not a medication the speaker is on.
+    assert "medications" not in extract_health_facts("Should I rest and take paracetamol?")
