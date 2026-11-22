@@ -463,7 +463,7 @@ The defaults point at the local Ollama server. Change `APP_SECRET` to a long ran
 ```bash
 uvicorn src.api.server:app --host 127.0.0.1 --port 8600
 ```
-Open <http://127.0.0.1:8600>, choose **Create Account**, and sign up (as `admin` for the Admin Console). The first start downloads the detector and retrieval models from Hugging Face (about 2 GB) and takes a few minutes. A first-run tour shows what is where.
+Open <http://127.0.0.1:8600>, choose **Create Account**, and sign up (as `admin` for the Admin Console). The first start downloads the detector and retrieval models from Hugging Face (about 2 GB) and takes a few minutes. A first-run tour shows what is where. The status chip reads **Running, limited** because the optional dense vector index (`chroma_db/`) is empty; retrieval uses BM25 with the MedCPT reranker, as in the paper.
 
 On Windows, start Ollama from its desktop app rather than with `ollama serve`: a server started from a terminal stops when that terminal closes.
 
@@ -471,6 +471,7 @@ On Windows, start Ollama from its desktop app rather than with `ollama serve`: a
 ```bash
 pytest -q
 ```
+Four benchmark tests are skipped until the benchmark datasets are downloaded with `python scripts/fetch_benchmarks.py`.
 
 **What is in the repository:** the code, the trained Layer H classifier (`src/security/harm_classifier.npz`), the calibrated thresholds, Layer B's jailbreak templates, and the BM25 retrieval index (`corpus/`). Not included, and rebuilt or downloaded on demand: model weights, the benchmark datasets (`python scripts/fetch_benchmarks.py`), the local database and logs (`data/`, created on first start).
 
