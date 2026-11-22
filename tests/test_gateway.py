@@ -454,3 +454,60 @@ def test_clarify_not_needed_continues_to_answer(stub_detectors):
     assert result.status == "ANSWERED"
     assert {"stage": "clarify", "outcome": "not_needed"}.items() <= next(
         s for s in result.steps if s["stage"] == "clarify").items()
+
+
+def test_retrieval_text_overrides_search_query(stub_detectors):
+    queries = []
+    gw_ = _gateway(RecordingModel(), retriever=lambda q: queries.append(q) or EVIDENCE)
+    gw_.run("My stomach hurts\n\nMore details: Warning signs: None of these", retrieval_text="My stomach hurts")
+    gw_.run("How is asthma managed?")
+    assert queries == ["My stomach hurts", "How is asthma managed?"]
+
+
+def test_consult_answers_skip_safety_net_lines_when_grounding(stub_detectors):
+    answer = (
+        "**What it could be:** Inhaled corticosteroids are the controller therapy for asthma management.\n"
+        "**See a doctor if:** you are not improving after a few days or it keeps coming back.\n"
+        "**Get urgent help now if:** you struggle to speak in full sentences or your lips turn blue."
+    )
+    plain = _gateway(RecordingModel(answer=answer)).run("How is asthma managed?")
+    consult = _gateway(RecordingModel(answer=answer)).run("How is asthma managed?", consult=True)
+    assert plain.withheld                      # safety lines count against the plain answer
+    assert not consult.withheld                # but not against a consultation answer
+    assert "Get urgent help now if" in consult.response_text
+
+
+def test_keep_verified_drops_unsupported_sentences():
+    from src.security.gateway import REDACTION_NOTE, _keep_verified
+
+    answer = (
+        "**What it could be:** Tension headache is common. This is not a diagnosis.\n"
+        "**What you can do now:** Rest in a dark room. Avoid screens for a while.\n"
+        "**Get urgent help now if:** the worst headache of your life starts suddenly."
+    )
+    audit = {"verified_claims": [{"claim": "**What it could be:** Tension headache is common."}]}
+    text, removed = _keep_verified(answer, audit)
+    assert removed == 2
+    assert "Tension headache is common." in text and "not a diagnosis" in text
+    assert "Rest in a dark room" not in text and "What you can do now" not in text
+    assert "Get urgent help now if" in text
+    assert text.endswith(REDACTION_NOTE)
+
+
+def test_keep_verified_withholds_when_nothing_is_supported():
+    from src.security.gateway import _keep_verified
+
+    assert _keep_verified("**What it could be:** Something unsupported here.", {"verified_claims": []})[1] == -1
+
+
+def test_consult_answer_is_redacted_not_withheld(stub_detectors):
+    answer = (
+        "**What it could be:** Inhaled corticosteroids are the controller therapy for asthma management.\n"
+        "**What you can do now:** Keep a diary of triggers like pollen. Open the windows at night daily.\n"
+        "**Get urgent help now if:** your lips turn blue."
+    )
+    result = _gateway(RecordingModel(answer=answer)).run("How is asthma managed?", consult=True)
+    assert not result.withheld
+    assert "controller therapy" in result.response_text
+    assert "pollen" not in result.response_text
+    assert next(s for s in result.steps if s["stage"] == "verify")["outcome"] == "redacted"

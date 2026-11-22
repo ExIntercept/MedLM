@@ -26,13 +26,13 @@ export default function Prescriptions({ profile }) {
         <h2 className="text-[15px] font-semibold text-clinical-ink">Active Medications &amp; Prescriptions</h2>
       </div>
       <p className="mb-3 text-xs text-clinical-muted">
-        Sourced from the Patient Intake panel under Active Consultation. Automatically screened against known
+        Taken from the medicines in your details on the Consultation page. Automatically screened against known
         hard-rule contraindications.
       </p>
 
       {!medications && (
         <p className="text-sm text-clinical-muted">
-          No medications currently recorded. Add them in the Patient Intake panel under Active Consultation.
+          No medications currently recorded. Add them under your details on the Consultation page, or just mention them in a chat.
         </p>
       )}
 

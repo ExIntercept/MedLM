@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import Header from "./components/Header";
 import { tabsFor } from "./lib/roles";
+import Tour, { markTourSeen, tourSeen } from "./components/Tour/Tour";
 import Sidebar from "./components/Sidebar/Sidebar";
 import ChatThread from "./components/Chat/ChatThread";
 import ChatInput from "./components/Chat/ChatInput";
@@ -115,6 +116,24 @@ function Workspace() {
 
   // Patients always use patient mode; the server enforces this too.
   const chatMode = isClinician ? mode : "patient";
+  // First-time walkthrough: shown once per user on this browser, replayable
+  // from the account menu. It starts on the Consultation page it points at.
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => {
+    if (user?.username && !tourSeen(user.username)) {
+      setActiveTab("consultation");
+      setTourOpen(true);
+    }
+  }, [user?.username]);
+  const startTour = () => {
+    setActiveTab("consultation");
+    setTourOpen(true);
+  };
+  const closeTour = () => {
+    markTourSeen(user?.username);
+    setTourOpen(false);
+  };
+
   const visibleTab = tabsFor(role).some((t) => t.key === activeTab) ? activeTab : "consultation";
 
   const handleSend = (message) => {
@@ -133,6 +152,7 @@ function Workspace() {
         activeTab={visibleTab}
         onTabChange={setActiveTab}
         onSignOut={handleSignOut}
+        onTour={startTour}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -153,7 +173,7 @@ function Workspace() {
 
             <main className="flex h-[calc(100vh-7.5rem)] min-h-[480px] flex-1 flex-col rounded-xl border border-slate-border bg-surface px-3 pb-3 pt-2 md:px-5">
               {isClinician && (
-                <div className="flex items-center justify-end gap-2 pt-1 text-xs text-clinical-muted">
+                <div data-tour="answer-style" className="ml-auto flex items-center justify-end gap-2 pt-1 text-xs text-clinical-muted">
                   Answer style
                   <div className="flex rounded-lg bg-slate-bg p-0.5 font-medium">
                     {[
@@ -188,7 +208,7 @@ function Workspace() {
                 <p className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
               )}
 
-              <div className="mx-auto w-full max-w-3xl">
+              <div data-tour="chat-input" className="mx-auto w-full max-w-3xl">
                 <ChatInput
                   onSend={handleSend}
                   onStop={stop}
@@ -213,6 +233,7 @@ function Workspace() {
         {visibleTab === "evaluation" && <EvaluationDashboard />}
         {visibleTab === "security" && <AdminConsole />}
       </div>
+      {tourOpen && <Tour role={role} onClose={closeTour} />}
     </div>
   );
 }

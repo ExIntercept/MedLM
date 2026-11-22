@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, Moon, ShieldPlus, Sun } from "lucide-react";
+import { ChevronDown, Compass, LogOut, Moon, ShieldPlus, Sun } from "lucide-react";
 import { cn } from "../lib/cn";
 import { getHealth } from "../lib/api";
 import { tabsFor } from "../lib/roles";
@@ -93,7 +93,7 @@ function SystemStatus() {
   );
 }
 
-function UserMenu({ username, role, onSignOut }) {
+function UserMenu({ username, role, onSignOut, onTour }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutside(ref, () => setOpen(false));
@@ -121,6 +121,18 @@ function UserMenu({ username, role, onSignOut }) {
             <div className="truncate text-sm font-medium text-clinical-ink">{username}</div>
             <div className="text-[11px] text-clinical-muted">{ROLE_LABEL[role] || "Patient"}</div>
           </div>
+          {onTour && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onTour();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-clinical-ink hover:bg-slate-bg"
+            >
+              <Compass size={15} className="text-clinical-muted" /> Take the tour
+            </button>
+          )}
           <button
             type="button"
             onClick={onSignOut}
@@ -141,6 +153,7 @@ function Tabs({ tabs, activeTab, onTabChange, className }) {
         <button
           key={tab.key}
           type="button"
+          data-tour={`tab-${tab.key}`}
           onClick={() => onTabChange(tab.key)}
           aria-current={activeTab === tab.key ? "page" : undefined}
           className={cn(
@@ -157,7 +170,7 @@ function Tabs({ tabs, activeTab, onTabChange, className }) {
   );
 }
 
-export default function Header({ username, role, activeTab, onTabChange, onSignOut, theme, onToggleTheme }) {
+export default function Header({ username, role, activeTab, onTabChange, onSignOut, onTour, theme, onToggleTheme }) {
   const tabs = tabsFor(role);
   return (
     <header className="sticky top-0 z-20 border-b border-slate-border bg-surface/90 backdrop-blur">
@@ -172,7 +185,12 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
         <Tabs tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} className="mx-2 hidden flex-1 items-center gap-1 lg:flex" />
 
         <div className="ml-auto flex items-center gap-1.5">
-          {role !== "patient" && <SystemStatus />}
+          {role !== "patient" && (
+            <div data-tour="status">
+              <SystemStatus />
+            </div>
+          )}
+          <div data-tour="account" className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={onToggleTheme}
@@ -182,7 +200,8 @@ export default function Header({ username, role, activeTab, onTabChange, onSignO
           >
             {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
           </button>
-          <UserMenu username={username} role={role} onSignOut={onSignOut} />
+          <UserMenu username={username} role={role} onSignOut={onSignOut} onTour={onTour} />
+          </div>
         </div>
       </div>
 

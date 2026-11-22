@@ -613,15 +613,19 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
             # Patients describing a new symptom are asked a few questions
             # first; their next message answers them, and the pipeline then
             # answers the original complaint together with those answers.
-            message, clarify, answered = req.message, None, None
-            if role == "patient":
+            # Applies to every plain-language chat: patients always, and staff
+            # who choose "Plain language" (so they can try the patient flow).
+            message, clarify, answered, original, consult = req.message, None, None, None, False
+            if req.mode == "patient":
+                from src.agents.clarify import combine_with_answers, is_symptom_complaint
+
                 original = _pending_clarification(db, conversation_id)
                 if original is not None:
-                    from src.agents.clarify import combine_with_answers
-
                     message, answered = combine_with_answers(original, req.message), req.message
+                    consult = True
                 else:
                     clarify = _clarify_for(db, req, user_id)
+                    consult = is_symptom_complaint(req.message)
 
             result = get_gateway().run(
                 message,
@@ -631,6 +635,12 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
                 conversation_id=conversation_id,
                 on_event=on_event,
                 clarify=clarify,
+                # Consultations search for management passages: a bare "I have
+                # a headache" otherwise pulls in rare subtypes, and the patient's
+                # answers ("warning signs: none") pull in drug warnings.
+                retrieval_text=(f"{original or req.message}. Causes, home treatment and when to see a doctor"
+                                if consult else original),
+                consult=consult,
             )
 
             shown_user_text = result.user_text

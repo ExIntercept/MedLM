@@ -73,7 +73,7 @@ export const STAGE_INFO = {
 export function outcomeTone(outcome = "") {
   const o = outcome.toLowerCase();
   if (["block", "blocked", "intercepted", "emergency", "withheld"].includes(o)) return "stop";
-  if (["flag", "modified", "case_discussion", "unsafe_allowed", "flagged", "ungrounded", "asked"].includes(o)) return "warn";
+  if (["flag", "modified", "case_discussion", "unsafe_allowed", "flagged", "ungrounded", "asked", "redacted"].includes(o)) return "warn";
   if (["off", "skipped"].includes(o) || o.startsWith("0 passages")) return "off";
   return "ok";
 }
@@ -82,7 +82,7 @@ export const OUTCOME_LABEL = {
   clean: "clean", modified: "sanitized", clear: "clear", emergency: "escalated",
   case_discussion: "case discussion", intercepted: "intercepted", allow: "allowed",
   flag: "flagged", block: "blocked", hardened: "hardened", answered: "answered",
-  pass: "grounded", flagged: "partly grounded", ungrounded: "ungrounded", withheld: "withheld",
+  pass: "grounded", flagged: "partly grounded", redacted: "unsupported lines removed", ungrounded: "ungrounded", withheld: "withheld",
   safe: "safe", unsafe_allowed: "unsafe (non-blocking)", blocked: "blocked", off: "off", skipped: "skipped",
   asked: "questions asked", not_needed: "not needed",
 };

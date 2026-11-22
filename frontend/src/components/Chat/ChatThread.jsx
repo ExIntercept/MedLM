@@ -41,7 +41,7 @@ export default function ChatThread({ messages, isStreaming, showInternals = fals
             : "Ask a clinical question or describe a case. Answers cite the guidelines they rely on."}
         </p>
         {onPick && (
-          <div className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+          <div data-tour="starters" className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
             {STARTERS[isPatient ? "patient" : "clinician"].map((s) => (
               <button
                 key={s}

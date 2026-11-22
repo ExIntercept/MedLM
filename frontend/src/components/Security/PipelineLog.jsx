@@ -99,6 +99,7 @@ function stageFacts(step) {
       break;
     case "verify":
       if (d.score != null) facts.push(["Faithfulness", `${Math.round(d.score * 100)}%`]);
+      if (d.removed?.length) facts.push(["Removed (not in the evidence)", d.removed.join(" · ")]);
       break;
     case "output_guard":
       if (d.categories?.length) facts.push(["Hazards", guardCategoryLabels(d.categories).join(", ")]);

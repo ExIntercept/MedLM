@@ -39,6 +39,10 @@ function describeOutcome(audit) {
       return { tone: RED, blocked: true, label: "Escalated · emergency triage", detail: [] };
     case "PASS":
       return { tone: GREEN, label: "Verified against evidence", detail: [score].filter(Boolean) };
+    case "FLAGGED":
+      return { tone: AMBER, label: "Partly verified · unsupported lines removed", detail: [score].filter(Boolean) };
+    case "CLARIFY":
+      return { tone: GREEN, label: "Asked follow-up questions first", detail: [] };
     default:
       return { tone: AMBER, label: audit.status, detail: [score].filter(Boolean) };
   }

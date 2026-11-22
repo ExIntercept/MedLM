@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from src.security.sanitize import SanitizedField, SanitizedInputs, sanitize_user_inputs
+from src.security.sanitize import SanitizedField, SanitizedInputs, sanitize_text, sanitize_user_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +131,73 @@ class GatewayResult:
     steps: list = field(default_factory=list)
     """One record per stage, in order: ``{"stage", "outcome", "ms", "detail"}``.
     Feeds the admin pipeline log; never shown to patients."""
+
+
+_SAFETY_NET_LABEL = re.compile(r"^\W*(?:see\s+a\s+doctor\s+if|get\s+urgent\s+help(?:\s+now)?\s+if)\b", re.IGNORECASE)
+_ANY_LABEL = re.compile(r"^\W*\*\*[^*\n]{2,40}:\*\*|^\W*#{1,4}\s")
+
+
+def _without_safety_net(answer: str) -> str:
+    """The answer minus its safety-netting sections, for grounding only.
+
+    A section runs from its label line to the next labelled line, so
+    multi-line advice under "See a doctor if" is skipped as a whole.
+    """
+    kept, skipping = [], False
+    for line in answer.splitlines():
+        if _SAFETY_NET_LABEL.search(line):
+            skipping = True
+            continue
+        if skipping and _ANY_LABEL.search(line):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+_DISCLAIMER = re.compile(r"\bnot\s+(?:a|meant\s+as\s+a)\s+diagnosis\b", re.IGNORECASE)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+REDACTION_NOTE = "_Some general advice was left out because it could not be checked against the medical guidelines._"
+
+
+def _keep_verified(answer: str, audit: dict) -> tuple[str, int]:
+    """Keep only verified sentences (plus safety-netting and disclaimers).
+
+    Returns ``(text, removed)``; ``removed`` is -1 when nothing of substance
+    survives, so the caller withholds the answer instead.
+    """
+    verified = {c["claim"] for c in audit.get("verified_claims", [])}
+    out, removed, kept_claims, in_net = [], 0, 0, False
+    for line in answer.splitlines():
+        if _SAFETY_NET_LABEL.search(line):
+            in_net = True
+        elif in_net and _ANY_LABEL.search(line):
+            in_net = False
+        if in_net or not line.strip():
+            out.append(line)
+            continue
+        label = _ANY_LABEL.match(line)
+        label_text = label.group(0).strip() if label else ""
+        kept = []
+        for sent in _SENTENCE_SPLIT.split(line.strip()):
+            s = sent.strip()
+            if s in verified:
+                kept.append(s)
+                kept_claims += 1
+            elif len(s) <= 15 or _DISCLAIMER.search(s):
+                kept.append(s)
+            else:
+                removed += 1
+        if kept and label_text and not kept[0].startswith(label_text):
+            kept[0] = f"{label_text} {kept[0]}"
+        if any(k != label_text for k in kept):
+            out.append(" ".join(kept))
+    if not kept_claims:
+        return answer, -1
+    text = "\n".join(out).strip()
+    if removed:
+        text += "\n\n" + REDACTION_NOTE
+    return text, removed
 
 
 def _step(steps: list, stage: str, outcome: str, t0: float, **detail) -> None:
@@ -355,6 +422,8 @@ class ClinicalDefenseGateway:
         conversation_id: Optional[int] = None,
         on_event: Optional[EventSink] = None,
         clarify: Optional[Callable[[str], Optional[dict]]] = None,
+        retrieval_text: Optional[str] = None,
+        consult: bool = False,
     ) -> GatewayResult:
         """Process one user turn end to end.
 
@@ -373,6 +442,15 @@ class ClinicalDefenseGateway:
                              questions instead of a model answer. The patient
                              chat passes it; evaluation never does, so benchmark
                              runs are unchanged.
+            retrieval_text:  Optional search query for evidence instead of the
+                             message. After a clarification the message holds
+                             the patient's answers too ("warning signs: none"),
+                             which pull in unrelated passages; the server passes
+                             the original complaint here. Sanitized before use.
+            consult:         Patient chat about the patient's own symptom: ask
+                             the model for a consultation-style answer (what it
+                             could be, what to do, when to get help). Off by
+                             default, so evaluation prompts are unchanged.
         """
         emit: EventSink = on_event or (lambda _e, _d: None)
         history = history or []
@@ -427,7 +505,10 @@ class ClinicalDefenseGateway:
         t0 = time.perf_counter()
         if self.retriever is not None:
             trace.append("retrieve")
-            evidence = list(self.retriever(vignette_text) or [])
+            query = vignette_text
+            if retrieval_text:
+                query = sanitize_text(retrieval_text, max_chars=6000).model_text
+            evidence = list(self.retriever(query) or [])
             _step(steps, "retrieve", f"{len(evidence)} passages", t0,
                   titles=[(m or {}).get("title", "Guideline") for _, _, m in evidence])
         else:
@@ -458,6 +539,7 @@ class ClinicalDefenseGateway:
                     vignette, detected_options, _format_evidence(ev), hist,
                     forced_tone=forced_tone, patient_profile_text=profile_note, flagged=flagged,
                     compact=bool(getattr(model_profile, "compact_prompt", False)),
+                    consult=consult,
                 )
             return _unhardened_messages(vignette, detected_options, _format_evidence(ev), hist, forced_tone, profile_note)
 
@@ -499,14 +581,30 @@ class ClinicalDefenseGateway:
         t0 = time.perf_counter()
         answer = sanitize_patient_output(clean_model_output(raw_answer, model_profile))
         # Options were split off the vignette; naming one restates the question.
-        audit = verify_evidence(answer, evidence, vignette_text, options=detected_options)
+        # Consultation answers end with safety-netting ("see a doctor if…",
+        # "get urgent help now if…"). Those lines only point to more care, so
+        # they are shown and output-guarded but not scored for grounding.
+        audit = verify_evidence(_without_safety_net(answer) if consult else answer,
+                                evidence, vignette_text, options=detected_options)
         draft_text = answer
         withheld = audit["status"] == "FLAGGED"
+        redacted = 0
+        if withheld and consult and audit.get("verified_claims"):
+            # Consultation answers are checked claim by claim: unsupported
+            # sentences are dropped and the rest shown, rather than all or
+            # nothing. Stricter than the 50% rule, which shows every sentence
+            # once half are grounded.
+            answer, redacted = _keep_verified(answer, audit)
+            withheld = redacted < 0
+            if withheld:
+                answer = draft_text
         if withheld:
             answer = WITHHELD_MESSAGE
             emit("verification_status", {"status": "FLAGGED"})
-        _step(steps, "verify", "withheld" if withheld else str(audit["status"]).lower(), t0,
-              score=audit.get("score"), withheld_draft=_excerpt(draft_text) if withheld else None)
+        _step(steps, "verify",
+              "withheld" if withheld else "redacted" if redacted else str(audit["status"]).lower(), t0,
+              score=audit.get("score"), withheld_draft=_excerpt(draft_text) if withheld else None,
+              removed=[c["claim"] for c in audit.get("flagged_claims", [])][:6] if redacted else None)
 
         # ── 9. Output guard: grounding measures evidence support, not harm.
         # An answer that reuses the question's own words can be fully

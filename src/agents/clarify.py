@@ -113,6 +113,16 @@ def _family(text: str) -> Optional[tuple[str, list[str]]]:
     return None
 
 
+def is_symptom_complaint(message: str) -> bool:
+    """True when the speaker describes their own symptom and is not asking a
+    direct factual or medication question: such messages get a consultation-
+    style answer (what it could be, what to do, when to get help)."""
+    text = (message or "").replace("’", "'").strip()
+    if not text or about_someone_else(text) or _DIRECT_QUESTION.search(text):
+        return False
+    return bool(_SELF_CUE.search(text) and _family(text))
+
+
 def plan_clarification(message: str, profile: Any = None) -> Optional[dict]:
     """Questions to ask before answering ``message``, or None to answer now.
 

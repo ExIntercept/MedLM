@@ -20,7 +20,7 @@ export default function PatientIntakeForm({ profile, onChange, isPatient = true,
   const filled = PROFILE_FIELDS.filter((f) => (profile[f.key] || "").trim());
 
   return (
-    <section className="rounded-xl border border-slate-border bg-surface p-4">
+    <section data-tour="details" className="rounded-xl border border-slate-border bg-surface p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-clinical-ink">{isPatient ? "Your details" : "Case details"}</h2>
         <button

@@ -24,6 +24,27 @@ _SUMMARY_REQUEST_PATTERN = re.compile(
 )
 
 
+# Patient chat only (``consult=True``): the person describes their own symptom.
+# Benchmarks never set it, so their prompts are unchanged.
+CONSULT_FORMAT = (
+    "The patient is describing their own symptom. Reply like a careful doctor talking to a patient, in plain "
+    "language, as four short labelled paragraphs in this order (put each label in bold at the start of its line):\n"
+    "**What it could be:** the one to three most likely common explanations that fit ONLY what the patient "
+    "reported (including any answers they gave about onset, severity and warning signs), based on the Retrieved "
+    "Guidelines. Say plainly that this is not a diagnosis.\n"
+    "**What you can do now:** two to four practical, safe self-care steps. Check the patient profile first: "
+    "avoid anything that conflicts with their medicines, conditions or allergies (for example, no NSAIDs with "
+    "anticoagulants) and say why.\n"
+    "**See a doctor if:** when to book a routine appointment (for example, not improving after a few days, or "
+    "keeps coming back).\n"
+    "**Get urgent help now if:** the specific warning signs for this symptom.\n"
+    "Base the first two parts only on the Retrieved Guidelines and leave out advice they do not support; "
+    "unsupported sentences are removed before the patient sees the answer. "
+    "Keep it under 200 words. Do not repeat the patient's message back to them. If one important detail is "
+    "still unknown, end with a single short question."
+)
+
+
 def wants_structured_summary(text: str) -> bool:
     return bool(_SUMMARY_REQUEST_PATTERN.search(text or ""))
 
@@ -192,6 +213,7 @@ def build_messages(
     flagged: bool = False,
     nonce: Optional[str] = None,
     compact: bool = False,
+    consult: bool = False,
 ) -> list[dict]:
     """Build the hardened clinical prompt as model-agnostic chat messages.
 
@@ -217,7 +239,7 @@ def build_messages(
     builder = _build_compact_parts if compact else _build_hardened_parts
     instructions, body = builder(
         clean_vignette, detected_options, evidence_md, history_block,
-        patient_profile_text, tone, nonce, flagged,
+        patient_profile_text, tone, nonce, flagged, consult=consult,
     )
     return [
         {"role": "system", "content": instructions},
@@ -266,6 +288,7 @@ def _build_hardened_parts(
     tone: str,
     nonce: str,
     flagged: bool,
+    consult: bool = False,
 ) -> tuple[str, str]:
     """Return ``(instructions, tagged_data_and_rules)`` for the hardened prompt.
 
@@ -333,7 +356,7 @@ def _build_hardened_parts(
 ### 🩺 Questions & Tests to Discuss With Your Doctor
 ### 🚨 Emergency Red Flags"""
         else:
-            format_instruction = "Respond in direct prose (with bullet points where they aid clarity) — do not produce a fixed multi-section report with formal headings unless the patient explicitly asks for a written summary."
+            format_instruction = CONSULT_FORMAT if consult else "Respond in direct prose (with bullet points where they aid clarity) — do not produce a fixed multi-section report with formal headings unless the patient explicitly asks for a written summary."
 
         persona = (
             f"You are an evidence-based clinical triage and medical education assistant. You are NOT a doctor, physician, or clinic scheduler.\n\n"
@@ -403,6 +426,7 @@ def _build_compact_parts(
     tone: str,
     nonce: str,
     flagged: bool,
+    consult: bool = False,
 ) -> tuple[str, str]:
     """Short form of :func:`_build_hardened_parts` for small fine-tunes.
 
@@ -417,6 +441,8 @@ def _build_compact_parts(
         persona = ("You are a careful medical assistant, not a doctor. Answer the question directly and "
                    "concisely, using the reference material. Do not recommend prescription-only drugs. "
                    "If the person describes an emergency, tell them to call emergency services now.")
+        if consult:
+            persona += "\n\n" + CONSULT_FORMAT
     else:
         persona = ("You are a physician and medical educator. Answer the clinical question concisely, "
                    "using the reference material.")

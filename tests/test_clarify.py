@@ -75,3 +75,31 @@ def test_combine_with_answers():
     assert combine_with_answers("I have a headache", "Today; Mild") == "I have a headache\n\nMore details: Today; Mild"
     assert combine_with_answers("I have a headache", "Just answer") == "I have a headache"
     assert combine_with_answers("I have a headache", "") == "I have a headache"
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("I have a headache", True),
+    ("I've had a mild rash on my arm since yesterday, no fever, I'm 30 and on no medicines", True),
+    ("Can I take ibuprofen with warfarin?", False),
+    ("My son has a fever", False),
+    ("What is metformin?", False),
+])
+def test_is_symptom_complaint(message, expected):
+    from src.agents.clarify import is_symptom_complaint
+
+    assert is_symptom_complaint(message) is expected
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_consult_format_only_when_asked(compact):
+    from src.agents.prompting import CONSULT_FORMAT, build_messages
+
+    args = ("I have a headache", None, "Headache guideline text.", [])
+    plain = build_messages(*args, forced_tone="patient", nonce="abcd1234", compact=compact)
+    again = build_messages(*args, forced_tone="patient", nonce="abcd1234", compact=compact, consult=False)
+    consult = build_messages(*args, forced_tone="patient", nonce="abcd1234", compact=compact, consult=True)
+    assert plain == again                       # default prompt unchanged
+    assert "What it could be" not in plain[0]["content"]
+    assert CONSULT_FORMAT in consult[0]["content"]
+    clinical = build_messages(*args, forced_tone="clinical_qa", nonce="abcd1234", compact=compact, consult=True)
+    assert "What it could be" not in clinical[0]["content"]   # clinicians never get it
