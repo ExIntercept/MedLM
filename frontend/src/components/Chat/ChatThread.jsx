@@ -31,6 +31,10 @@ export default function ChatThread({ messages, isStreaming, showInternals = fals
         <p className="max-w-md text-sm italic text-clinical-muted">
           You&apos;re in a confidential session. Please describe what you are experiencing below.
         </p>
+        <p className="max-w-md text-[11px] text-clinical-muted">
+          For safety, conversations may be reviewed by the service&apos;s administrators; every review is logged.
+          This assistant does not replace a doctor.
+        </p>
       </div>
     );
   }

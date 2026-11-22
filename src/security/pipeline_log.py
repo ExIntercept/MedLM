@@ -74,3 +74,19 @@ def read(limit: int = 100, after: Optional[str] = None) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def read_all() -> list[dict]:
+    """Every entry, oldest first (for statistics)."""
+    if not PIPELINE_LOG_PATH.exists():
+        return []
+    out = []
+    for line in PIPELINE_LOG_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out

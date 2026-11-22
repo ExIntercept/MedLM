@@ -306,7 +306,7 @@ def health():
         "chromadb": chromadb_ok,
         "chromadb_chunks": chromadb_count,
         "reranker": reranker_ok,
-        "model": LLM_MODEL,
+        "model": _active_model_name(),
         "llm_provider": LLM_PROVIDER,
         "prompt_style": LLM_TEMPLATE if LLM_PROVIDER == "completions" else "server_chat_template",
         "guard_model": _guard_model(),
@@ -713,6 +713,161 @@ def put_health_record(update: HealthRecordUpdate, current_user: ApiUser = Depend
                       db: Session = Depends(get_db_session)):
     """Replace the record with the user's own corrections."""
     return {"profile": _store_health_record(db, current_user.id, update.profile.model_dump())}
+
+
+# --------------------------------------------------------------------------
+# Admin: model selection
+# --------------------------------------------------------------------------
+class ModelSwitch(BaseModel):
+    model: str
+
+
+def _active_model_name() -> str:
+    return getattr(get_gateway().llm, "model", None) or LLM_MODEL
+
+
+@app.get("/api/admin/models")
+def list_models(_: ApiUser = Depends(_require_admin)):
+    """The medical models the gateway can use, which are installed, and which is active."""
+    from src.llm.catalog import MEDICAL_MODELS
+    from src.llm.model_profiles import resolve_profile
+
+    served = set(health_sync().get("served_models") or [])
+    active = _active_model_name()
+    models = []
+    for m in MEDICAL_MODELS:
+        p = resolve_profile(m["model"])
+        models.append({**m, "family": p.family, "context_window": p.context_window,
+                       "installed": m["model"] in served, "active": m["model"] == active,
+                       "default": m["model"] == LLM_MODEL})
+    return {"active": active, "models": models, "server_reachable": bool(served)}
+
+
+@app.post("/api/admin/model")
+def switch_model(req: ModelSwitch, admin: ApiUser = Depends(_require_admin)):
+    """Point the gateway at another medical model; applies from the next message.
+
+    Only catalogue models are accepted, and only when the model server has them.
+    The defenses are unchanged: that is the point of a model-agnostic gateway.
+    """
+    from src.config import LLM_API_KEY, LLM_BASE_URL
+    from src.llm.adapters import for_medical_model
+    from src.llm.catalog import find
+    from src.security import access_log
+
+    entry = find(req.model)
+    if entry is None:
+        raise HTTPException(status_code=400, detail="Unknown model; pick one from the list.")
+    served = health_sync().get("served_models") or []
+    if served and req.model not in served:
+        raise HTTPException(status_code=409, detail="That model is not installed on the model server.")
+    previous = _active_model_name()
+    adapter = get_default_adapter() if req.model == LLM_MODEL else for_medical_model(
+        req.model, LLM_BASE_URL, provider=entry["provider"], api_key=LLM_API_KEY)
+    gw = get_gateway()
+    with _gateway_lock:
+        gw.llm = adapter
+    access_log.record(admin.username, "switch_model", model=req.model, previous=previous)
+    return {"active": req.model, "previous": previous}
+
+
+# --------------------------------------------------------------------------
+# Admin: users, their consultations, usage statistics, access audit
+# --------------------------------------------------------------------------
+@app.get("/api/admin/users")
+def admin_users(db: Session = Depends(get_db_session), _: ApiUser = Depends(_require_admin)):
+    """Every account with its role and activity (metadata only; no message text)."""
+    from sqlalchemy import func
+
+    from src.security import pipeline_log
+    from src.security.pipeline_stats import per_user
+
+    activity = per_user(pipeline_log.read_all())
+    conv_counts = dict(db.exec(select(Conversation.user_id, func.count(Conversation.id)).group_by(Conversation.user_id)).all())
+    last_msg = dict(db.exec(
+        select(Conversation.user_id, func.max(ConversationMessage.created_at))
+        .join(ConversationMessage, ConversationMessage.conversation_id == Conversation.id)
+        .group_by(Conversation.user_id)
+    ).all())
+    users = []
+    for u in db.exec(select(ApiUser).order_by(ApiUser.created_at.desc())).all():
+        a = activity.get(u.username, {})
+        last = last_msg.get(u.id)
+        users.append({
+            "id": u.id, "username": u.username, "role": user_role(u.username),
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "consultations": conv_counts.get(u.id, 0),
+            "last_active": a.get("last") or (last.isoformat() if last else None),
+            "requests": a.get("requests", 0), "stopped": a.get("stopped", 0),
+            "flagged": a.get("flagged", 0), "sanitized": a.get("sanitized", 0),
+        })
+    return {"users": users}
+
+
+@app.get("/api/admin/users/{user_id}")
+def admin_user_detail(user_id: int, db: Session = Depends(get_db_session), admin: ApiUser = Depends(_require_admin)):
+    from sqlalchemy import func
+
+    from src.security import access_log
+
+    u = db.get(ApiUser, user_id)
+    if u is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    access_log.record(admin.username, "view_user", u.username)
+    counts = dict(db.exec(
+        select(ConversationMessage.conversation_id, func.count(ConversationMessage.id))
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(Conversation.user_id == user_id)
+        .group_by(ConversationMessage.conversation_id)
+    ).all())
+    convs = db.exec(select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())).all()
+    return {
+        "id": u.id, "username": u.username, "role": user_role(u.username),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "health_record": _load_health_record(db, u.id),
+        "conversations": [{"id": c.id, "title": c.title, "created_at": c.created_at.isoformat(),
+                           "messages": counts.get(c.id, 0)} for c in convs],
+    }
+
+
+@app.get("/api/admin/conversations/{conversation_id}")
+def admin_conversation(conversation_id: int, db: Session = Depends(get_db_session),
+                       admin: ApiUser = Depends(_require_admin)):
+    """Transcript plus the pipeline record of every turn, for debugging."""
+    from src.security import access_log, pipeline_log
+
+    conv = db.get(Conversation, conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    owner = db.get(ApiUser, conv.user_id)
+    access_log.record(admin.username, "view_conversation", owner.username if owner else None,
+                      conversation_id=conversation_id)
+    rows = db.exec(select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
+                   .order_by(ConversationMessage.id.asc())).all()
+    runs = [r for r in pipeline_log.read_all() if r.get("conversation_id") == conversation_id]
+    return {
+        "id": conv.id, "title": conv.title, "created_at": conv.created_at.isoformat(),
+        "owner": owner.username if owner else None,
+        "patient_profile": json.loads(conv.patient_profile) if conv.patient_profile else None,
+        "messages": [{"role": r.role, "content": r.content, "created_at": r.created_at.isoformat(),
+                      "meta": json.loads(r.meta) if r.meta else None} for r in rows],
+        "runs": runs,
+    }
+
+
+@app.get("/api/admin/stats")
+def admin_stats(days: int = 7, _: ApiUser = Depends(_require_admin)):
+    from src.security import pipeline_log
+    from src.security.pipeline_stats import summarize
+
+    return summarize(pipeline_log.read_all(), days=max(1, min(days, 90)))
+
+
+@app.get("/api/admin/access-log")
+def admin_access_log(limit: int = 200, _: ApiUser = Depends(_require_admin)):
+    from src.security import access_log
+
+    return {"logs": access_log.read(limit=max(1, min(limit, 1000)))}
 
 
 @app.get("/api/admin/pipeline-log")

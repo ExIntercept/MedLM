@@ -46,13 +46,13 @@ function Panel({ title, action, children }) {
   );
 }
 
-export default function SecurityConsole() {
+export default function SecurityConsole({ hidePipeline = false }) {
   const [config, setConfig] = useState(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
-  const [view, setView] = useState("pipeline");
+  const [view, setView] = useState(hidePipeline ? "detector" : "pipeline");
   const [filter, setFilter] = useState("ALL");
 
   const load = useCallback(async () => {
@@ -154,7 +154,7 @@ export default function SecurityConsole() {
             {[
               { key: "pipeline", label: "Live pipeline", Icon: Activity },
               { key: "detector", label: "Detector log", Icon: ListChecks },
-            ].map(({ key, label, Icon }) => (
+            ].filter((t) => !(hidePipeline && t.key === "pipeline")).map(({ key, label, Icon }) => (
               <button
                 key={key}
                 type="button"

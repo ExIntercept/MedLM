@@ -5,7 +5,7 @@ export const TABS = [
   { key: "prescriptions", label: "Medication Check", roles: ["patient", "clinician", "admin"] },
   { key: "evidence", label: "Evidence Explorer", roles: ["clinician", "admin"] },
   { key: "evaluation", label: "Model Evaluation", roles: ["clinician", "admin"] },
-  { key: "security", label: "Security Console", roles: ["admin"] },
+  { key: "security", label: "Admin Console", roles: ["admin"] },
 ];
 
 export function tabsFor(role) {

@@ -266,7 +266,15 @@ async function adminJson(path, options) {
     err.forbidden = true;
     throw err;
   }
-  if (!res.ok) throw new Error(`request failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = (await res.json()).detail || "";
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(detail || `request failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -314,3 +322,19 @@ export async function saveHealthRecord(profile) {
   if (!res.ok) throw new Error(`failed to save health record: ${res.status}`);
   return res.json();
 }
+
+// --------------------------------------------------------------------------
+// Admin console
+// --------------------------------------------------------------------------
+export const getAdminModels = () => adminJson("/api/admin/models");
+export const setAdminModel = (model) =>
+  adminJson("/api/admin/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+export const getAdminUsers = () => adminJson("/api/admin/users");
+export const getAdminUser = (id) => adminJson(`/api/admin/users/${id}`);
+export const getAdminConversation = (id) => adminJson(`/api/admin/conversations/${id}`);
+export const getAdminStats = (days = 7) => adminJson(`/api/admin/stats?days=${days}`);
+export const getAccessLog = (limit = 200) => adminJson(`/api/admin/access-log?limit=${limit}`);

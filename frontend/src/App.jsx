@@ -9,7 +9,7 @@ import MedicalRecords from "./components/Records/MedicalRecords";
 import Prescriptions from "./components/Prescriptions/Prescriptions";
 import EvidenceExplorer from "./components/Evidence/EvidenceExplorer";
 import EvaluationDashboard from "./components/EvaluationDashboard";
-import SecurityConsole from "./components/Security/SecurityConsole";
+import AdminConsole from "./components/Admin/AdminConsole";
 import LoginPage from "./components/Auth/LoginPage";
 import { useChatStream } from "./hooks/useChatStream";
 import { useAuth } from "./context/AuthContext";
@@ -198,7 +198,7 @@ function Workspace() {
       {visibleTab === "prescriptions" && <Prescriptions profile={profile} />}
       {visibleTab === "evidence" && <EvidenceExplorer mode={chatMode} />}
       {visibleTab === "evaluation" && <EvaluationDashboard />}
-      {visibleTab === "security" && <SecurityConsole />}
+      {visibleTab === "security" && <AdminConsole />}
     </div>
   );
 }

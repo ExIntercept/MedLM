@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Pause, Play, Radio } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { getPipelineLog } from "../../lib/api";
+import FlowMap, { requestStates } from "../Admin/FlowMap";
 import { OUTCOME_LABEL, STAGES, STAGE_INFO, guardCategoryLabels, outcomeTone, reasonLabels } from "../../lib/defense";
 
 const POLL_MS = 3000;
@@ -154,6 +155,15 @@ function ExcerptBox({ label, text, tone }) {
   );
 }
 
+export function RequestDetail({ rec }) {
+  return (
+    <div className="space-y-4">
+      <FlowMap rec={rec} className="rounded-lg border border-slate-border bg-surface p-2" />
+      <Timeline rec={rec} />
+    </div>
+  );
+}
+
 function Timeline({ rec }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -210,13 +220,14 @@ function Timeline({ rec }) {
   );
 }
 
-export default function PipelineLog() {
+export default function PipelineLog({ showMap = true }) {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
   const [live, setLive] = useState(true);
   const [filter, setFilter] = useState("all");
   const [open, setOpen] = useState(null);
   const [fresh, setFresh] = useState(() => new Set());
+  const [stage, setStage] = useState(null);
   const newest = useRef(null);
 
   const poll = useCallback(async () => {
@@ -245,7 +256,12 @@ export default function PipelineLog() {
   }, [live, poll]);
 
   const active = FILTERS.find((f) => f.key === filter) || FILTERS[0];
-  const shown = logs.filter(active.test);
+  const atStage = (r) => {
+    if (!stage) return true;
+    const st = requestStates(r).states[stage];
+    return st && (st.tone === "stop" || st.tone === "warn");
+  };
+  const shown = logs.filter((r) => active.test(r) && atStage(r));
 
   return (
     <div>
@@ -280,6 +296,22 @@ export default function PipelineLog() {
       </div>
 
       {error && <p className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
+
+      {showMap && logs.length > 0 && (
+        <div className="mb-4 rounded-lg border border-slate-border p-2">
+          <div className="mb-1 flex items-center justify-between px-1 text-xs">
+            <span className="font-semibold text-clinical-ink">
+              Where requests went · last {logs.length}
+            </span>
+            {stage && (
+              <button type="button" onClick={() => setStage(null)} className="font-semibold text-clinical-teal-dark hover:underline">
+                Clear stage filter ({stage})
+              </button>
+            )}
+          </div>
+          <FlowMap logs={logs} onSelect={setStage} selected={stage} />
+        </div>
+      )}
 
       {shown.length === 0 ? (
         <p className="py-8 text-center text-sm text-clinical-muted">
@@ -336,7 +368,7 @@ export default function PipelineLog() {
                     {isOpen && (
                       <tr>
                         <td colSpan={7} className="bg-slate-bg/50 px-3 py-4">
-                          <Timeline rec={r} />
+                          <RequestDetail rec={r} />
                         </td>
                       </tr>
                     )}
