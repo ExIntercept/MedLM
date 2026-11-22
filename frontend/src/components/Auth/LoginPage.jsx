@@ -26,7 +26,7 @@ export default function LoginPage() {
         await login(username.trim(), password);
       } else {
         await register(username.trim(), password, email.trim());
-        showToast("Account created — welcome to MedIntake AI.", "success");
+        showToast("Account created — welcome to MedLM.", "success");
       }
     } catch (err) {
       setFormError(err.message || "Something went wrong. Please try again.");
@@ -42,7 +42,7 @@ export default function LoginPage() {
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-clinical-teal-tint text-clinical-teal-dark">
             <ShieldCheck size={24} />
           </div>
-          <h1 className="text-xl font-bold text-clinical-ink">MedIntake AI</h1>
+          <h1 className="text-xl font-bold text-clinical-ink">MedLM</h1>
           <p className="mt-1 text-sm text-clinical-muted">Secure clinical decision support &amp; intake portal</p>
         </div>
 
