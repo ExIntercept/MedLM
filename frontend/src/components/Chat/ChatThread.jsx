@@ -75,6 +75,9 @@ export default function ChatThread({ messages, isStreaming, showInternals = fals
           sources={message.sources}
           audit={message.audit}
           triage={message.triage}
+          clarify={message.clarify}
+          clarifyActive={!isStreaming && i === messages.length - 1}
+          onAnswer={onPick}
           showInternals={showInternals}
           isStreaming={isStreaming && i === messages.length - 1 && message.role === "assistant"}
         />

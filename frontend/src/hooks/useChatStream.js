@@ -66,6 +66,12 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
               } catch (e) {
                 console.warn("Skipping unparseable 'triage_status' SSE payload:", data, e);
               }
+            } else if (event === "clarify") {
+              try {
+                patchAssistant({ clarify: JSON.parse(data).questions || [] });
+              } catch (e) {
+                console.warn("Skipping unparseable 'clarify' SSE payload:", data, e);
+              }
             } else if (event === "security_status") {
               try {
                 patchAssistant({ security: JSON.parse(data) });

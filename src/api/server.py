@@ -228,6 +228,35 @@ def _conversation_history(db: Session, conversation_id: int, last_n: int = 6) ->
     return [{"role": r.role, "content": r.content} for r in reversed(rows)]
 
 
+def _pending_clarification(db: Session, conversation_id: int) -> Optional[str]:
+    """The complaint the assistant just asked about, if its last turn was a
+    clarification; the next message holds the patient's answers."""
+    rows = db.exec(
+        select(ConversationMessage)
+        .where(ConversationMessage.conversation_id == conversation_id)
+        .order_by(ConversationMessage.id.desc())
+        .limit(2)
+    ).all()
+    if len(rows) < 2 or rows[0].role != "assistant" or rows[1].role != "user":
+        return None
+    try:
+        meta = json.loads(rows[0].meta) if rows[0].meta else {}
+    except (TypeError, ValueError):
+        return None
+    return rows[1].content if isinstance(meta, dict) and meta.get("clarify") else None
+
+
+def _clarify_for(db: Session, req: "ChatStreamRequest", user_id: Optional[int]):
+    """The clarify hook for a patient's new complaint: what is already known
+    (saved record plus this consultation's details) counts as answered."""
+    from src.agents.clarify import plan_clarification
+
+    known = _load_health_record(db, user_id) if user_id is not None else {}
+    if req.patient_profile:
+        known.update({k: v for k, v in req.patient_profile.model_dump().items() if (v or "").strip()})
+    return lambda text: plan_clarification(text, known)
+
+
 def _conversation_messages_full(db: Session, conversation_id: int) -> list:
     rows = db.exec(
         select(ConversationMessage)
@@ -557,6 +586,8 @@ _INTERNAL_EVENTS = {"security_status", "verification_status"}
 
 def _patient_done_payload(done: dict) -> dict:
     """What a patient's client learns at the end of a turn: nothing internal."""
+    if done["status"] == "CLARIFY":
+        return {"status": "CLARIFY"}
     return {"status": "ANSWERED" if done["status"] in ("PASS", "FLAGGED", "UNGROUNDED") else "NOT_ANSWERED"}
 
 
@@ -579,16 +610,35 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
             # turn-forgery attacks via client-supplied "assistant" turns.
             db_history = _conversation_history(db, conversation_id, last_n=6)
 
+            # Patients describing a new symptom are asked a few questions
+            # first; their next message answers them, and the pipeline then
+            # answers the original complaint together with those answers.
+            message, clarify, answered = req.message, None, None
+            if role == "patient":
+                original = _pending_clarification(db, conversation_id)
+                if original is not None:
+                    from src.agents.clarify import combine_with_answers
+
+                    message, answered = combine_with_answers(original, req.message), req.message
+                else:
+                    clarify = _clarify_for(db, req, user_id)
+
             result = get_gateway().run(
-                req.message,
+                message,
                 profile=req.patient_profile,
                 history=db_history,
                 mode=req.mode,
                 conversation_id=conversation_id,
                 on_event=on_event,
+                clarify=clarify,
             )
 
-            _save_message(db, conversation_id, "user", result.user_text)
+            shown_user_text = result.user_text
+            if answered is not None:
+                from src.security.sanitize import sanitize_text
+
+                shown_user_text = sanitize_text(answered, max_chars=6000).model_text
+            _save_message(db, conversation_id, "user", shown_user_text)
             _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
             try:
                 merged = _update_records_after_turn(db, result, req, conversation_id, user_id, role)

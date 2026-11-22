@@ -19,6 +19,7 @@ const STATUS = {
   PASS: ["Answered", "ok"], FLAGGED: ["Answered", "ok"], UNGROUNDED: ["Answered", "warn"],
   BLOCKED: ["Blocked", "stop"], OUTPUT_BLOCKED: ["Answer blocked", "stop"], WITHHELD: ["Withheld", "warn"],
   INTERCEPTED: ["Intercepted", "stop"], EMERGENCY_ESCALATION: ["Emergency", "stop"],
+  CLARIFY: ["Asked questions", "warn"],
 };
 
 const FILTERS = [
@@ -36,7 +37,7 @@ function stepOf(rec, stage) {
 function StageStrip({ rec }) {
   return (
     <div className="flex items-center gap-1">
-      {STAGES.map((s) => {
+      {STAGES.filter((s) => !s.optional || stepOf(rec, s.key)).map((s) => {
         const step = stepOf(rec, s.key);
         const tone = step ? outcomeTone(step.outcome) : "none";
         return (
@@ -80,6 +81,10 @@ function stageFacts(step) {
       if (d.layer_ms)
         facts.push(["Per-layer ms", Object.entries(d.layer_ms).filter(([k]) => k !== "total").map(([k, v]) => `${k} ${Math.round(v)}`).join(" · ")]);
       if (d.disabled?.length) facts.push(["Disabled layers", d.disabled.join(", ")]);
+      break;
+    case "clarify":
+      if (d.family) facts.push(["Symptom", d.family]);
+      if (d.questions?.length) facts.push(["Asked", d.questions.join(" · ")]);
       break;
     case "retrieve":
       if (d.titles?.length) facts.push(["Passages", d.titles.join(" · ")]);
@@ -168,7 +173,7 @@ function Timeline({ rec }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <ol className="relative space-y-3 border-l border-slate-border pl-5">
-        {STAGES.map((s) => {
+        {STAGES.filter((s) => !s.optional || stepOf(rec, s.key)).map((s) => {
           const step = stepOf(rec, s.key);
           const tone = step ? outcomeTone(step.outcome) : "none";
           const facts = step ? stageFacts(step) : [];

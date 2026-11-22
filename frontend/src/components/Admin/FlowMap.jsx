@@ -18,6 +18,7 @@ const NODES = [
   { id: "B", label: "B · Jailbreak", x: 636, y: 84, small: true },
   { id: "H", label: "H · Harm intent", x: 636, y: 216, small: true },
   { id: "G", label: "G · Llama Guard", x: 636, y: 272, small: true },
+  { id: "clarify", label: "Clarify", x: 768, y: 58, small: true },
   { id: "retrieve", label: "Retrieve", x: 768, y: MAIN_Y },
   { id: "evidence", label: "Evidence", x: 768, y: 250, small: true },
   { id: "harden", label: "Harden", x: 892, y: MAIN_Y },
@@ -34,7 +35,7 @@ const EDGES = [
   ["input", "sanitize"], ["sanitize", "triage"], ["triage", "guardrails"], ["guardrails", "detect"],
   ["detect", "A"], ["detect", "B"], ["detect", "H"], ["detect", "G"],
   ["A", "retrieve"], ["B", "retrieve"], ["H", "retrieve"], ["G", "retrieve"],
-  ["retrieve", "evidence"], ["retrieve", "harden"], ["harden", "generate"], ["generate", "verify"],
+  ["clarify", "retrieve"], ["retrieve", "evidence"], ["retrieve", "harden"], ["harden", "generate"], ["generate", "verify"],
   ["verify", "output_guard"], ["output_guard", "response"],
 ];
 const MAIN_ORDER = ["sanitize", "triage", "guardrails", "detect", "retrieve", "harden", "generate", "verify", "output_guard"];
@@ -51,7 +52,7 @@ const FILL = {
 
 function edgePath(a, b) {
   const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
-  if (b.id === "evidence") return `M ${a.x + W / 2} ${a.y + H} L ${b.x + W / 2} ${b.y}`;
+  if (b.id === "evidence" || a.id === "clarify") return `M ${a.x + W / 2} ${a.y + H} L ${b.x + W / 2} ${b.y}`;
   const dx = Math.max(30, (x2 - x1) / 2);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
@@ -102,15 +103,30 @@ export function requestStates(rec) {
     else if (fired[k]) states[k] = { tone: det.outcome === "block" ? fired[k] : "warn", sub: scores[k] ?? "fired" };
     else states[k] = { tone: scores[k] == null ? "none" : "ok", sub: scores[k] ?? "no score" };
   }
+  // Clarify: patients' new symptom complaints only. Asking questions ends the
+  // turn early, but it is a pause for the patient, not a refusal.
+  const c = steps.clarify;
+  let paused = false;
+  if (c?.outcome === "asked") {
+    paused = !stoppedAt;
+    states.clarify = { tone: "warn", sub: `${(c.detail?.questions || []).length} questions` };
+  } else if (c) {
+    states.clarify = { tone: "ok", sub: OUTCOME_LABEL[c.outcome] || c.outcome };
+  } else {
+    states.clarify = { tone: "none", sub: steps.retrieve ? "not used" : "not reached" };
+  }
+  if (paused) stoppedAt = "clarify";
   const r = steps.retrieve;
   states.evidence = r && r.outcome !== "off"
     ? { tone: "neutral", sub: r.outcome }
     : { tone: "none", sub: r ? "off" : "not reached" };
   if (steps.generate?.detail?.model) states.generate.sub = shortModel(steps.generate.detail.model);
-  states.response = stoppedAt
+  states.response = paused
+    ? { tone: "warn", sub: "questions shown" }
+    : stoppedAt
     ? { tone: "warn", sub: "safe message shown" }
     : { tone: "ok", sub: "answer shown" };
-  return { states, stoppedAt };
+  return { states, stoppedAt, paused };
 }
 
 /** Per-node counts across many requests. */
@@ -132,12 +148,16 @@ export function aggregateStates(logs) {
     traffic[id] = reached;
     const tone = c.stop ? "stop" : c.warn ? "warn" : reached ? (id === "input" || id === "evidence" ? "neutral" : "ok") : c.off ? "off" : "none";
     const parts = [];
-    if (id === "response") parts.push(`${logs.length - c.warn} answered`, c.warn ? `${c.warn} refused` : null);
+    if (id === "response") {
+      const asked = logs.filter((r) => r.status === "CLARIFY").length;
+      parts.push(`${logs.length - c.warn} answered`, asked ? `${asked} asked` : null,
+                 c.warn - asked ? `${c.warn - asked} refused` : null);
+    }
     else if (!reached) parts.push(c.off ? "off" : "not run");
     else {
       parts.push(`${reached} in`);
       if (c.stop) parts.push(`${c.stop} stopped`);
-      if (c.warn) parts.push(`${c.warn} ${id === "sanitize" ? "cleaned" : "flagged"}`);
+      if (c.warn) parts.push(`${c.warn} ${id === "sanitize" ? "cleaned" : id === "clarify" ? "asked" : "flagged"}`);
     }
     states[id] = { tone, sub: parts.filter(Boolean).join(" · "), count: c };
   });
@@ -155,7 +175,7 @@ export function shortModel(name = "") {
  */
 export default function FlowMap({ rec, logs, onSelect, selected, className }) {
   const aggregate = !!logs;
-  const { states, stoppedAt } = aggregate ? { ...aggregateStates(logs), stoppedAt: null } : requestStates(rec);
+  const { states, stoppedAt, paused } = aggregate ? { ...aggregateStates(logs), stoppedAt: null } : requestStates(rec);
   const traffic = aggregate ? aggregateStates(logs).traffic : null;
   const maxTraffic = aggregate ? Math.max(1, ...Object.values(traffic)) : 1;
   const fills = FILL;
@@ -196,8 +216,8 @@ export default function FlowMap({ rec, logs, onSelect, selected, className }) {
             fill="none"
             strokeWidth={2}
             strokeDasharray="6 5"
-            className="stroke-red-400"
-            markerEnd="url(#arrow)"
+            className={paused ? "stroke-amber-400" : "stroke-red-400"}
+            markerEnd={paused ? undefined : "url(#arrow)"}
           />
         )}
         {NODES.map((n) => {

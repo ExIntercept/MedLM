@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import { Markdown } from "../../lib/markdown";
 import { STAGES, guardCategoryLabels, reasonLabels } from "../../lib/defense";
 import EvidenceAccordion from "./EvidenceAccordion";
+import ClarifyCard from "./ClarifyCard";
 
 const RED = "bg-red-50 text-red-700 border-red-200";
 const AMBER = "bg-amber-50 text-amber-700 border-amber-200";
@@ -71,7 +72,7 @@ function AuditBadge({ audit }) {
       )}
       {open && trace.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px]">
-          {STAGES.map((s, i) => {
+          {STAGES.filter((s) => !s.optional || trace.includes(s.key)).map((s, i, shown) => {
             const ran = trace.includes(s.key) || (s.key === "harden" && trace.includes("prompt"));
             return (
               <span key={s.key} className="flex items-center gap-1">
@@ -84,7 +85,7 @@ function AuditBadge({ audit }) {
                 >
                   {s.label}
                 </span>
-                {i < STAGES.length - 1 && <span className="text-slate-300">›</span>}
+                {i < shown.length - 1 && <span className="text-slate-300">›</span>}
               </span>
             );
           })}
@@ -104,7 +105,14 @@ function TriageBadge({ triage }) {
   );
 }
 
-export default function ChatMessage({ role, content, sources, audit, triage, isStreaming, showInternals = false }) {
+export default function ChatMessage({
+  role, content, sources, audit, triage, isStreaming, showInternals = false,
+  clarify, clarifyActive = false, onAnswer,
+}) {
+  // A clarification renders its questions as a card; the plain text (kept for
+  // history and screen readers) shows only its first and last lines.
+  const asking = !isStreaming && clarify?.length > 0;
+  const lines = asking ? content.split(/\n/).filter((l) => l.trim()) : [];
   const isUser = role === "user";
   const isEmergency = triage?.level === "EMERGENCY";
   return (
@@ -133,7 +141,15 @@ export default function ChatMessage({ role, content, sources, audit, triage, isS
         ) : (
           <>
             <TriageBadge triage={triage} />
-            <Markdown text={content} className="text-[15px] leading-relaxed" />
+            {asking ? (
+              <>
+                <p className="text-[15px] leading-relaxed">{lines[0]}</p>
+                <ClarifyCard questions={clarify} active={clarifyActive && !!onAnswer} onAnswer={onAnswer} />
+                <p className="mt-2 text-xs leading-relaxed text-clinical-muted">{lines[lines.length - 1]}</p>
+              </>
+            ) : (
+              <Markdown text={content} className="text-[15px] leading-relaxed" />
+            )}
             {isStreaming && content === "" && (
               <span className="inline-flex gap-1 py-1">
                 <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-clinical-teal [animation-delay:-0.2s]" />

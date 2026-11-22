@@ -354,6 +354,7 @@ class ClinicalDefenseGateway:
         mode: str = "patient",
         conversation_id: Optional[int] = None,
         on_event: Optional[EventSink] = None,
+        clarify: Optional[Callable[[str], Optional[dict]]] = None,
     ) -> GatewayResult:
         """Process one user turn end to end.
 
@@ -366,6 +367,12 @@ class ClinicalDefenseGateway:
             mode:            "patient" or "clinician" (controls tone).
             conversation_id: Used only for the defense log.
             on_event:        ``fn(event_name, data)`` progress callback.
+            clarify:         Optional ``fn(sanitized_text) -> plan | None``. When
+                             given and it returns a plan, the turn ends after the
+                             security stages with status CLARIFY and the plan's
+                             questions instead of a model answer. The patient
+                             chat passes it; evaluation never does, so benchmark
+                             runs are unchanged.
         """
         emit: EventSink = on_event or (lambda _e, _d: None)
         history = history or []
@@ -379,6 +386,32 @@ class ClinicalDefenseGateway:
         flagged = screened.flagged
         trace = list(screened.trace)
         steps = list(screened.steps)
+
+        # ── 4b. Clarify (patient chat only) ────────────────────────────
+        # Runs after every security stage, so an attack is blocked and an
+        # emergency escalated before any question is asked.
+        if clarify is not None:
+            t0 = time.perf_counter()
+            plan = None if flagged else clarify(user_text)
+            if plan:
+                trace.append("clarify")
+                _step(steps, "clarify", "asked", t0, family=plan.get("family"),
+                      questions=[q.get("text") for q in plan.get("questions", [])])
+                emit("sources", [])
+                emit("clarify", {"questions": plan.get("questions", [])})
+                emit("token", plan["text"])
+                return GatewayResult(
+                    status="CLARIFY",
+                    response_text=plan["text"],
+                    user_text=user_text,
+                    decision=decision,
+                    trace=trace,
+                    flagged=flagged,
+                    sanitized=san,
+                    meta={"clarify": {"family": plan.get("family"), "questions": plan.get("questions", [])}},
+                    steps=steps,
+                )
+            _step(steps, "clarify", "skipped" if flagged else "not_needed", t0)
 
         from src.agents.intake_extraction import extract_intake_fields
 
