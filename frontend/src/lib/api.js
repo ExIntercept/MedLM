@@ -244,3 +244,46 @@ export async function streamChat(payload, onEvent, { signal } = {}) {
     onEvent(parseSSEFrame(buffer));
   }
 }
+
+// --------------------------------------------------------------------------
+// Cross-model defense results and the security console
+// --------------------------------------------------------------------------
+/** Returns { results, markdown } built by scripts/paper_tables.py; throws if not built yet. */
+export async function getCrossModelResults() {
+  const res = await fetch(`${API_BASE}/api/evaluation/cross-model`);
+  if (res.status === 404) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "No cross-model results yet.");
+  }
+  if (!res.ok) throw new Error(`failed to load cross-model results: ${res.status}`);
+  return res.json();
+}
+
+async function adminJson(path, options) {
+  const res = await authFetch(path, options);
+  if (res.status === 403) {
+    const err = new Error("Administrator access required. Add your username to ADMIN_USERNAMES in .env.");
+    err.forbidden = true;
+    throw err;
+  }
+  if (!res.ok) throw new Error(`request failed: ${res.status}`);
+  return res.json();
+}
+
+/** Returns { toggles, thresholds, prompt_guard_status, defense_enabled_env }. */
+export function getDefenseConfig() {
+  return adminJson("/api/admin/defense-config");
+}
+
+export function updateDefenseToggles(toggles) {
+  return adminJson("/api/admin/defense-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ toggles }),
+  });
+}
+
+/** Returns { logs: [...] }, newest first. */
+export function getDefenseLog(limit = 50) {
+  return adminJson(`/api/admin/defense-log?limit=${limit}`);
+}

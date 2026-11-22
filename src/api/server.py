@@ -244,6 +244,23 @@ def evaluation_summary():
     }
 
 
+_CROSS_MODEL_RESULTS = DOCS_DIR / "paper" / "results.json"
+_CROSS_MODEL_REPORT = DOCS_DIR / "paper" / "RESULTS.md"
+
+
+@app.get("/api/evaluation/cross-model")
+def evaluation_cross_model():
+    """Cross-model defense results (scripts/paper_tables.py), if they have been built."""
+    if not _CROSS_MODEL_RESULTS.exists():
+        raise HTTPException(status_code=404, detail="No cross-model results yet; run scripts/paper_tables.py")
+    try:
+        data = json.loads(_CROSS_MODEL_RESULTS.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"results.json is not valid JSON: {exc}")
+    markdown = _CROSS_MODEL_REPORT.read_text(encoding="utf-8") if _CROSS_MODEL_REPORT.exists() else ""
+    return {"results": data, "markdown": markdown}
+
+
 @app.get("/api/evaluation/report")
 def evaluation_report():
     if not _BENCHMARK_REPORT_PATH.exists():
@@ -401,6 +418,35 @@ def get_gateway() -> ClinicalDefenseGateway:
 _DONE_SCORE = {"EMERGENCY_ESCALATION": 1.0, "INTERCEPTED": 1.0, "BLOCKED": None}
 
 
+def _done_payload(result) -> dict:
+    """The final SSE event: what the user was shown and which defense acted.
+
+    ``status`` is the outcome the UI badges: PASS / FLAGGED / UNGROUNDED (grounding
+    verdict on a shown answer), WITHHELD (failed grounding), OUTPUT_BLOCKED (the
+    output guard replaced an unsafe answer), or the gateway's early-stop status.
+    """
+    decision = result.decision
+    defense = {
+        "trace": result.trace,
+        "flagged": result.flagged,
+        "reasons": list(getattr(decision, "reasons", None) or []),
+        "category": getattr(decision, "category", None),
+        "guard_categories": list(getattr(decision, "guard_categories", None) or []),
+        "output_guard": (result.meta or {}).get("output_guard"),
+    }
+    if result.status != "ANSWERED":
+        return {"status": result.status, "score": _DONE_SCORE.get(result.status), "defense": defense}
+    audit = result.audit
+    status = "OUTPUT_BLOCKED" if result.output_blocked else "WITHHELD" if result.withheld else audit["status"]
+    return {
+        "status": status,
+        "score": audit["score"],
+        "verified_claims": audit["verified_claims"],
+        "flagged_claims": audit["flagged_claims"],
+        "defense": defense,
+    }
+
+
 # --------------------------------------------------------------------------
 # Real-Time Chat Stream (SSE)
 # --------------------------------------------------------------------------
@@ -423,17 +469,7 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
             _save_message(db, conversation_id, "user", result.user_text)
             _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
 
-            if result.status == "ANSWERED":
-                audit = result.audit
-                done = {
-                    "status": audit["status"],
-                    "score": audit["score"],
-                    "verified_claims": audit["verified_claims"],
-                    "flagged_claims": audit["flagged_claims"],
-                }
-            else:
-                done = {"status": result.status, "score": _DONE_SCORE.get(result.status)}
-            sink.put({"event": "done", "data": done})
+            sink.put({"event": "done", "data": _done_payload(result)})
         except Exception as exc:
             sink.put({"event": "error", "data": str(exc)})
         finally:

@@ -7,6 +7,7 @@ const TABS = [
   { key: "prescriptions", label: "Prescriptions" },
   { key: "evidence", label: "Evidence Explorer" },
   { key: "evaluation", label: "Model Evaluation & Proof" },
+  { key: "security", label: "Security Console" },
 ];
 
 function StatusPill({ label }) {
@@ -23,14 +24,15 @@ export default function Header({ username = "Clinician", activeTab, onTabChange,
     <header className="rounded-xl border border-slate-border bg-white px-6 py-4 shadow-card">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-[20px] font-bold tracking-tight text-clinical-ink">MedIntake AI</h1>
+          <h1 className="text-[20px] font-bold tracking-tight text-clinical-ink">MedLM</h1>
           <p className="mt-0.5 text-sm text-clinical-muted">
-            Hybrid retrieval-augmented reasoning with evidence verification and safety guardrails.
+            Model-agnostic adversarial defense for medical language models: every answer passes nine safety stages.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <StatusPill label="System Online" />
-            <StatusPill label="HIPAA Local Storage" />
+            <StatusPill label="Local Storage" />
             <StatusPill label="Evidence Grounded" />
+            <StatusPill label="Input + Output Guard" />
           </div>
         </div>
         <div className="flex items-center gap-2">

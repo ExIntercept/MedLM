@@ -3,6 +3,7 @@ import { Download, FileText, Loader2, TrendingUp, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Markdown } from "../lib/markdown";
 import { getEvaluationReport, getEvaluationSummary } from "../lib/api";
+import CrossModelResults from "./CrossModelResults";
 
 function pct(v) {
   return v === null || v === undefined ? "N/A" : `${(v * 100).toFixed(1)}%`;
@@ -44,6 +45,16 @@ function downloadMarkdown(markdown) {
 }
 
 export default function EvaluationDashboard() {
+  return (
+    <div className="flex flex-col gap-4">
+      <CrossModelResults />
+      <ClinicalQABenchmark />
+    </div>
+  );
+}
+
+/** The single-model clinical QA benchmark (scripts/run_benchmark.py). */
+function ClinicalQABenchmark() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
