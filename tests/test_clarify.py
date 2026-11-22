@@ -65,6 +65,40 @@ def test_warning_signs_match_the_symptom():
     assert warning["options"][0] == "None of these"
 
 
+@pytest.mark.parametrize("message,expected", [
+    ("I have a headache", "location"),
+    ("My stomach hurts", "location"),
+    ("I've got a bad cough", "type"),
+    ("I have a fever", "height"),
+    ("I'm feeling dizzy", "type"),
+    ("I have pain when I pee", None),         # urinary: pain already said
+])
+def test_symptom_specific_question_is_asked(message, expected):
+    plan = plan_clarification(message)
+    assert plan is not None
+    ids = _ids(plan)
+    if expected:
+        assert expected in ids
+    assert ids[-1] != "onset"                  # display order, not priority order
+    assert all(q.get("label") for q in plan["questions"])
+    assert all("known" not in q for q in plan["questions"])
+
+
+def test_specific_question_skipped_when_already_answered():
+    plan = plan_clarification("I have a headache on one side of my head")
+    assert "location" not in _ids(plan)
+    plan = plan_clarification("I've got a dry cough")
+    assert "type" not in _ids(plan)
+
+
+def test_warning_question_always_kept():
+    plan = plan_clarification("My stomach hurts")
+    assert "warning" in _ids(plan)
+    assert len(plan["questions"]) == MAX_QUESTIONS
+    order = _ids(plan)
+    assert order.index("onset") < order.index("warning")
+
+
 def test_text_mentions_emergency_number():
     text = clarification_text([{"id": "x", "text": "How bad is it?", "options": [], "kind": "text"}])
     assert "emergency number" in text

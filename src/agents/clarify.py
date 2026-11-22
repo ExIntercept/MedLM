@@ -24,7 +24,104 @@ from typing import Any, Optional
 
 from src.records.health_record import about_someone_else, extract_health_facts
 
-MAX_QUESTIONS = 3
+# Up to three questions chosen by priority, plus the warning-signs question,
+# which is always kept when it is still unanswered.
+MAX_QUESTIONS = 4
+
+
+def _q(qid: str, label: str, text: str, options: list[str], known: str, kind: str = "choice") -> dict:
+    """A symptom-specific question; ``known`` matches messages that already answer it."""
+    return {"id": qid, "label": label, "text": text, "options": options, "kind": kind,
+            "known": re.compile(known, re.IGNORECASE)}
+
+
+# What a doctor would ask next for each symptom group, most useful first.
+_SPECIFIC: dict[str, list[dict]] = {
+    "headache": [
+        _q("location", "Where", "Where is the pain?",
+           ["One side", "Both sides or all over", "Forehead or behind the eyes", "Back of the head"],
+           r"\b(?:one\s+side|both\s+sides|forehead|temples?|behind\s+(?:my|the)\s+eyes?|back\s+of\s+(?:my|the)\s+head|all\s+over)\b"),
+        _q("with", "Along with it", "Is anything else happening with it?",
+           ["Nausea or light hurts my eyes", "Blocked nose or a cold", "Stress or poor sleep", "Nothing else"],
+           r"\b(?:nause\w*|light|sensitiv\w*|blocked\s+nose|congest\w*|a\s+cold|stress\w*|sleep\w*)\b"),
+    ],
+    "chest": [
+        _q("character", "Feels like", "What does it feel like?",
+           ["Tight or pressing", "Sharp, worse when I breathe in", "Burning, after eating", "Sore when I press on it"],
+           r"\b(?:tight\w*|pressure|pressing|squeez\w*|sharp|stabbing|burning|heartburn|tender)\b"),
+        _q("when", "Happens", "When does it happen?",
+           ["During activity", "At rest", "After meals", "When I move or breathe in"],
+           r"\b(?:exercis\w*|running|walking|stairs|at\s+rest|after\s+(?:eating|meals?)|breath(?:e|ing)\s+in)\b"),
+    ],
+    "breathing": [
+        _q("when", "Breathless", "When are you short of breath?",
+           ["Only when active", "At rest too", "When lying flat", "At night"],
+           r"\b(?:exert\w*|exercis\w*|stairs|walking|at\s+rest|lying|at\s+night)\b"),
+        _q("lungs", "Lung history", "Do you have asthma or another lung condition?",
+           ["Asthma", "COPD", "Another lung condition", "No"],
+           r"\b(?:asthma|copd|emphysema|bronchitis|lung\s+condition)\b"),
+    ],
+    "cough": [
+        _q("type", "Cough type", "Is it dry, or are you bringing up phlegm?",
+           ["Dry", "Clear or white phlegm", "Yellow or green phlegm"],
+           r"\b(?:dry|phlegm|mucus|sputum|productive|chesty)\b"),
+        _q("with", "Along with it", "Do you have any of these with it?",
+           ["Fever", "Runny or blocked nose", "Sore throat", "None of these"],
+           r"\b(?:fever|temperature|runny|blocked\s+nose|sore\s+throat|a\s+cold)\b"),
+    ],
+    "fever": [
+        _q("height", "Temperature", "How high has it been?",
+           ["Under 38 °C (100.4 °F)", "38–39 °C", "Over 39 °C (102.2 °F)", "Not measured"],
+           r"\b\d{2,3}(?:\.\d)?\s*°?\s*[cf]\b|\b(?:degrees?|high\s+fever|low[- ]grade)\b"),
+        _q("with", "Along with it", "Any other symptoms with the fever?",
+           ["Cough or sore throat", "Burning when I pee", "Diarrhoea or vomiting", "None of these"],
+           r"\b(?:cough\w*|sore\s+throat|urin\w*|pee|diarrh\w*|vomit\w*|rash)\b"),
+    ],
+    "stomach": [
+        _q("location", "Where", "Where in your tummy is it?",
+           ["Upper middle", "Lower right", "Lower left", "All over"],
+           r"\b(?:upper|lower|right|left|middle|belly\s+button|navel|all\s+over)\b"),
+        _q("with", "Along with it", "Is anything else happening?",
+           ["Vomiting", "Diarrhoea", "Constipation", "Nothing else"],
+           r"\b(?:vomit\w*|diarrh\w*|constipat\w*|loose\s+stools?)\b"),
+    ],
+    "urinary": [
+        _q("what", "Noticing", "What are you noticing?",
+           ["Burning or pain when I pee", "Going more often", "Both", "Something else"],
+           r"\b(?:burn\w*|sting\w*|pain\w*|frequen\w*|more\s+often|urgen\w*)\b"),
+    ],
+    "skin": [
+        _q("feel", "Feels", "Is it itchy or painful?", ["Itchy", "Painful", "Both", "Neither"],
+           r"\b(?:itch\w*|pain\w*|sore|burn\w*|sting\w*)\b"),
+        _q("where", "Where", "Where is it?", ["Face", "Arms or legs", "Body", "Several places"],
+           r"\b(?:face|arms?|legs?|hands?|feet|chest|back|body|neck|scalp|all\s+over)\b"),
+    ],
+    "dizziness": [
+        _q("type", "Feels like", "What does it feel like?",
+           ["The room is spinning", "Light-headed or about to faint", "Unsteady on my feet"],
+           r"\b(?:spin\w*|light-?headed|faint\w*|unsteady|off\s+balance|vertigo)\b"),
+        _q("when", "Happens", "When does it happen?",
+           ["When I stand up", "When I move my head", "All the time"],
+           r"\b(?:stand\w*|get(?:ting)?\s+up|(?:turn|mov)\w*\s+(?:my\s+)?head|all\s+the\s+time|constant\w*)\b"),
+    ],
+    "pain": [
+        _q("where", "Where", "Where exactly is the pain?", [],
+           r"\b(?:knee|back|neck|shoulder|hip|ankle|wrist|elbow|foot|feet|hand|leg|arm|joint|muscle|jaw|tooth|teeth|ear|throat|eye)s?\b",
+           kind="text"),
+        _q("injury", "Injury", "Did it start after an injury or strain?",
+           ["Yes, after an injury or strain", "No, it came on by itself"],
+           r"\b(?:fell|fall(?:en)?|injur\w*|sprain\w*|twist\w*|strain\w*|lift\w*|hit|knock\w*)\b"),
+    ],
+    "general": [
+        _q("pattern", "Pattern", "Has this happened before?",
+           ["This is the first time", "On and off", "Getting worse over time"],
+           r"\b(?:first\s+time|before|again|on\s+and\s+off|recurr\w*|getting\s+worse|keeps?\s+happening)\b"),
+    ],
+}
+
+# Display order of every question kind.
+_ORDER = ["onset", "severity", "location", "where", "character", "type", "feel", "what", "height",
+          "when", "with", "injury", "pattern", "lungs", "warning", "background", "age"]
 
 # ── Is this a personal symptom complaint? ───────────────────────────────
 _SELF_CUE = re.compile(
@@ -147,37 +244,50 @@ def plan_clarification(message: str, profile: Any = None) -> Optional[dict]:
     name, signs = family
 
     facts = extract_health_facts(text)
-    questions: list[dict] = []
+    onset = severity = warning = background = age = None
     if not (facts.get("duration") or _ONSET.search(text)):
-        questions.append({
-            "id": "onset", "kind": "choice", "text": "When did it start?",
+        onset = {
+            "id": "onset", "label": "Started", "kind": "choice", "text": "When did it start?",
             "options": ["Today", "1–3 days ago", "4–7 days ago", "Over a week ago"],
-        })
+        }
     if not _SEVERITY.search(text):
-        questions.append({
-            "id": "severity", "kind": "choice", "text": "How bad is it?",
+        severity = {
+            "id": "severity", "label": "Severity", "kind": "choice", "text": "How bad is it?",
             "options": ["Mild", "Moderate", "Severe"],
-        })
+        }
     if not _NO_WARNING.search(text):
-        questions.append({
-            "id": "warning", "kind": "choice",
+        warning = {
+            "id": "warning", "label": "Warning signs", "kind": "choice",
             "text": "Do you have any of these: " + ", ".join(signs) + "?",
             "options": ["None of these", "Yes, at least one"],
-        })
+        }
     has_meds = facts.get("medications") or _known(profile, "medications")
     has_conditions = facts.get("conditions") or _known(profile, "conditions")
     if not (has_meds or has_conditions or _NO_BACKGROUND.search(text)):
-        questions.append({
-            "id": "background", "kind": "text",
+        background = {
+            "id": "background", "label": "Conditions or medicines", "kind": "text",
             "text": "Do you have any long-term conditions or take any regular medicines?",
             "options": [],
-        })
+        }
     if not (facts.get("age") or _known(profile, "age")):
-        questions.append({"id": "age", "kind": "text", "text": "How old are you?", "options": []})
+        age = {"id": "age", "label": "Age", "kind": "text", "text": "How old are you?", "options": []}
 
-    if len(questions) < 2:
+    specific = [
+        {k: v for k, v in q.items() if k != "known"}
+        for q in _SPECIFIC.get(name, []) if not q["known"].search(text)
+    ]
+    first, second = (specific + [None, None])[:2]
+
+    # Pick by usefulness, then show in a natural consultation order. The
+    # warning-signs question is always kept while it is unanswered.
+    by_priority = [q for q in (onset, first, severity, second, background, age) if q]
+    chosen = by_priority[: MAX_QUESTIONS - (1 if warning else 0)]
+    if warning:
+        chosen.append(warning)
+    if len(chosen) < 2:
         return None  # enough to go on: answer straight away
-    questions = questions[:MAX_QUESTIONS]
+    rank = {qid: i for i, qid in enumerate(_ORDER)}
+    questions = sorted(chosen, key=lambda q: rank.get(q["id"], len(rank)))
     return {"family": name, "questions": questions, "text": clarification_text(questions)}
 
 

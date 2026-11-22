@@ -23,7 +23,7 @@ export default function ClarifyCard({ questions, active, onAnswer }) {
 
   const submit = () => {
     if (!given.length) return;
-    onAnswer(given.map((q) => `${ANSWER_LABEL[q.id] || q.text}: ${answers[q.id].trim()}`).join("; "));
+    onAnswer(given.map((q) => `${q.label || ANSWER_LABEL[q.id] || q.text}: ${answers[q.id].trim()}`).join("; "));
   };
 
   return (
