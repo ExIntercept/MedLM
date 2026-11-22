@@ -127,7 +127,7 @@ function ClinicalQABenchmark() {
           <div>
             <h2 className="flex items-center gap-2 text-[15px] font-semibold text-clinical-ink">
               <TrendingUp size={16} className="text-clinical-teal" />
-              Model Evaluation &amp; Proof
+              Clinical QA benchmark (single model, retrieval and grounding)
             </h2>
             <p className="mt-0.5 text-xs text-clinical-muted">
               {summary.num_cases} test cases · model <code>{summary.model}</code> · generated{" "}
