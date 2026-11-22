@@ -110,7 +110,7 @@ function TriageBadge({ triage }) {
 }
 
 export default function ChatMessage({
-  role, content, sources, audit, triage, isStreaming, showInternals = false,
+  role, content, image, sources, audit, triage, isStreaming, showInternals = false,
   clarify, clarifyActive = false, onAnswer,
 }) {
   // A clarification renders its questions as a card; the plain text (kept for
@@ -141,7 +141,12 @@ export default function ChatMessage({
         )}
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{content}</p>
+          <>
+            {image && (
+              <img src={image} alt="Attached image" className="mb-2 max-h-48 max-w-full rounded-lg border border-slate-border" />
+            )}
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{content}</p>
+          </>
         ) : (
           <>
             <TriageBadge triage={triage} />

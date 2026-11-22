@@ -136,8 +136,8 @@ function Workspace() {
 
   const visibleTab = tabsFor(role).some((t) => t.key === activeTab) ? activeTab : "consultation";
 
-  const handleSend = (message) => {
-    send({ message, patientProfile: profile, mode: chatMode });
+  const handleSend = (message, image) => {
+    send({ message, patientProfile: profile, mode: chatMode, image });
   };
 
   const handleSignOut = () => {

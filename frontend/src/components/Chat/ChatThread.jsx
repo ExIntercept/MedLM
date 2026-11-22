@@ -72,6 +72,7 @@ export default function ChatThread({ messages, isStreaming, showInternals = fals
           key={i}
           role={message.role}
           content={message.content}
+          image={message.image}
           sources={message.sources}
           audit={message.audit}
           triage={message.triage}

@@ -8,6 +8,8 @@ reached through an :class:`~src.llm.adapters.LLMAdapter`:
     2. triage     - deterministic emergency red-flag escalation
     3. guardrails - hard-coded contraindication intercepts
     4. detect     - Layers A, B, H, G (Llama Guard on the input) -> ALLOW / FLAG / BLOCK
+       image      - optional: a vision model describes an attached image; sentences
+                    that read as instructions are quarantined (src/security/image_guard.py)
     5. retrieve   - optional evidence retrieval (injected callable)
     6. harden     - nonce-tagged system/user messages (no model-specific markers)
     7. generate   - adapter.stream(...)  <- the only model-specific step
@@ -74,6 +76,7 @@ DEFAULT_TOGGLES: dict[str, bool] = {
     "layer_llama_guard": True,
     "layer_prompt_hardening": True,
     "layer_output_guard": True,
+    "layer_image_check": True,
 }
 
 Evidence = list  # list[tuple[chunk_id, text, meta]]
@@ -224,6 +227,7 @@ class ClinicalDefenseGateway:
         temperature: float = 0.2,
         max_tokens: int = 640,
         log_decisions: bool = True,
+        vision_llm=None,
     ):
         """
         Args:
@@ -233,6 +237,8 @@ class ClinicalDefenseGateway:
                          request, so the admin console can change it live.
             temperature: Sampling temperature passed to the adapter.
             max_tokens:  Generation budget passed to the adapter.
+            vision_llm:  Adapter that reads attached images. Defaults to ``llm``; only
+                         its text description of the image ever reaches ``llm``.
         """
         self.llm = llm
         self.retriever = retriever
@@ -240,6 +246,7 @@ class ClinicalDefenseGateway:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.log_decisions = log_decisions
+        self.vision_llm = vision_llm
 
     def _on(self, key: str) -> bool:
         return self.toggles.get(key, DEFAULT_TOGGLES.get(key, True))
@@ -424,6 +431,7 @@ class ClinicalDefenseGateway:
         clarify: Optional[Callable[[str], Optional[dict]]] = None,
         retrieval_text: Optional[str] = None,
         consult: bool = False,
+        image: Optional[tuple[str, str]] = None,
     ) -> GatewayResult:
         """Process one user turn end to end.
 
@@ -451,6 +459,11 @@ class ClinicalDefenseGateway:
                              the model for a consultation-style answer (what it
                              could be, what to do, when to get help). Off by
                              default, so evaluation prompts are unchanged.
+            image:           Optional ``(mime, base64)`` of an attached image, already
+                             validated (``image_guard.parse_data_url``). The protected
+                             model never sees it: a vision model describes it, the
+                             description is checked sentence by sentence, and the
+                             cleaned text is passed as untrusted data.
         """
         emit: EventSink = on_event or (lambda _e, _d: None)
         history = history or []
@@ -468,7 +481,7 @@ class ClinicalDefenseGateway:
         # ── 4b. Clarify (patient chat only) ────────────────────────────
         # Runs after every security stage, so an attack is blocked and an
         # emergency escalated before any question is asked.
-        if clarify is not None:
+        if clarify is not None and image is None:
             t0 = time.perf_counter()
             plan = None if flagged else clarify(user_text)
             if plan:
@@ -497,6 +510,27 @@ class ClinicalDefenseGateway:
         if extracted:
             emit("profile_update", extracted)
 
+        # ── 4c. Image check (only when an image is attached) ───────────
+        image_check = None
+        if image is not None:
+            from src.security.image_guard import ImageCheck, run_image_check
+
+            t0 = time.perf_counter()
+            trace.append("image")
+            checked = self._on("layer_image_check") and self._on("defense_enabled")
+            image_check = run_image_check(self.vision_llm or self.llm, image[0], image[1],
+                                          use_detectors=checked)
+            if not checked and not image_check.error:
+                image_check = ImageCheck(description=image_check.description,
+                                         cleaned=image_check.description, ms=image_check.ms)
+            outcome = ("unreadable" if image_check.error else
+                       "quarantined" if image_check.quarantined else "clean" if checked else "unchecked")
+            _step(steps, "image", outcome, t0, error=image_check.error,
+                  quarantined=[q["sentence"] for q in image_check.scores] or None,
+                  checks=[q["check"] for q in image_check.scores] or None,
+                  description=_excerpt(image_check.description, 600) or None)
+            emit("image_status", {"status": outcome.upper(), "quarantined": len(image_check.quarantined)})
+
         # ── 5. Retrieval ───────────────────────────────────────────────
         from src.agents.guardrails import parse_embedded_options
 
@@ -513,6 +547,13 @@ class ClinicalDefenseGateway:
                   titles=[(m or {}).get("title", "Guideline") for _, _, m in evidence])
         else:
             _step(steps, "retrieve", "off", t0)
+        if image_check is not None and image_check.cleaned:
+            # The description is data, like a retrieved passage: it goes inside
+            # the delimited evidence block and can ground the answer.
+            evidence.insert(0, ("image", image_check.cleaned,
+                                {"title": "Attached image: description by the vision model "
+                                          "(untrusted; may be incomplete)",
+                                 "source": "uploaded image", "cross_score": 0.0}))
 
         # ── 6. Prompt hardening, fitted to this model's context window ─
         from src.agents.prompting import format_patient_profile
@@ -606,26 +647,43 @@ class ClinicalDefenseGateway:
               score=audit.get("score"), withheld_draft=_excerpt(draft_text) if withheld else None,
               removed=[c["claim"] for c in audit.get("flagged_claims", [])][:6] if redacted else None)
 
+        # ── 8b. Did the answer carry out an instruction removed from the image?
+        image_followed = None
+        if image_check is not None and image_check.quarantined and not withheld:
+            from src.security.image_guard import IMAGE_INJECTION_MESSAGE, follows_quarantined
+
+            trace.append("image_output")
+            image_followed = follows_quarantined(answer, image_check.quarantined)
+            if image_followed:
+                answer = IMAGE_INJECTION_MESSAGE
+                emit("security_status", {"action": "BLOCK", "category": "IMAGE_INJECTION"})
+            _step(steps, "image_output", "followed" if image_followed else "clear", time.perf_counter(),
+                  instruction=image_followed)
+        if image_check is not None and image_check.error and not withheld and not image_followed:
+            from src.security.image_guard import UNREADABLE_NOTE
+
+            answer = f"{UNREADABLE_NOTE}\n\n{answer}"
+
         # ── 9. Output guard: grounding measures evidence support, not harm.
         # An answer that reuses the question's own words can be fully
         # "grounded" and still unsafe, so Llama Guard also judges the answer.
         output_guard = None
         t0 = time.perf_counter()
-        if not withheld and self._on("defense_enabled") and self._on("layer_output_guard"):
+        if not withheld and not image_followed and self._on("defense_enabled") and self._on("layer_output_guard"):
             output_guard = _check_output(user_text, answer)
             if output_guard is not None:
                 trace.append("output_guard")
                 if output_guard.blocks:
                     answer = OUTPUT_BLOCKED_MESSAGE
                     emit("security_status", {"action": "BLOCK", "category": "UNSAFE_OUTPUT"})
-        output_blocked = bool(output_guard is not None and output_guard.blocks)
+        output_blocked = bool(output_guard is not None and output_guard.blocks) or bool(image_followed)
         if output_guard is not None:
             _step(steps, "output_guard",
                   "blocked" if output_blocked else "unsafe_allowed" if output_guard.unsafe else "safe",
                   t0, categories=output_guard.categories,
                   blocked_answer=_excerpt(draft_text) if output_blocked else None)
         else:
-            _step(steps, "output_guard", "skipped" if withheld else "off", t0)
+            _step(steps, "output_guard", "skipped" if withheld or image_followed else "off", t0)
         emit("token", answer)
 
         return GatewayResult(
@@ -650,6 +708,9 @@ class ClinicalDefenseGateway:
                 "model": getattr(self.llm, "name", type(self.llm).__name__),
                 "model_family": model_profile.family if model_profile else None,
                 "context_fit": fit_notes,
+                "image": None if image_check is None else {
+                    "error": image_check.error, "quarantined": image_check.quarantined,
+                    "followed": image_followed, "ms": image_check.ms},
                 "security": {
                     "action": decision.action if decision else "BYPASSED",
                     "pg": decision.pg_score if decision else None,

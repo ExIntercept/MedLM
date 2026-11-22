@@ -48,6 +48,12 @@ if LLM_BASE_URL.endswith("/v1"):
     LLM_BASE_URL = LLM_BASE_URL[: -len("/v1")]
 LLM_API_KEY = os.environ.get("LLM_API_KEY") or COLAB_API_KEY
 LLM_MODEL = os.environ.get("LLM_MODEL") or MODEL_ID
+# Optional vision model that reads attached images (OpenAI-compatible chat API with
+# image input, on LLM_BASE_URL unless VISION_BASE_URL is set). Empty: images are read
+# by the protected model itself when it accepts them (MedGemma does). Either way the
+# protected model only ever receives the checked text description.
+VISION_MODEL = os.environ.get("VISION_MODEL", "")
+VISION_BASE_URL = (os.environ.get("VISION_BASE_URL") or LLM_BASE_URL).rstrip("/")
 # Template for LLM_PROVIDER=completions: gemma | chatml | llama3 | mistral | plain.
 # Falls back to PROMPT_STYLE ("chat" -> chatml, "base" -> plain).
 LLM_TEMPLATE = (os.environ.get("LLM_TEMPLATE") or PROMPT_STYLE).lower()

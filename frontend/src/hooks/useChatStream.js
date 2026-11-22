@@ -15,13 +15,13 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
   const { showToast } = useToast();
 
   const send = useCallback(
-    async ({ message, patientProfile, mode }) => {
+    async ({ message, patientProfile, mode, image }) => {
       setError(null);
       setIsStreaming(true);
 
       setMessages((prev) => [
         ...prev,
-        { role: "user", content: message },
+        { role: "user", content: message, image: image || undefined },
         { role: "assistant", content: "", sources: [], audit: null, triage: null, security: null },
       ]);
 
@@ -44,6 +44,7 @@ export function useChatStream({ conversationId, onConversationId, onProfileUpdat
             message,
             patient_profile: patientProfile,
             mode,
+            ...(image ? { image } : {}),
           },
           ({ event, data }) => {
             if (event === "conversation") {

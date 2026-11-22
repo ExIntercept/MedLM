@@ -109,6 +109,9 @@ class ChatStreamRequest(BaseModel):
     # Field is kept so old clients pass schema validation, but its value is ignored.
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Literal["patient", "clinician"] = "patient"
+    # Optional attached image as a data URL (PNG, JPEG or WebP, at most 5 MB).
+    # The protected model never receives it; see src/security/image_guard.py.
+    image: Optional[str] = Field(default=None, max_length=7_200_000)
 
 
 
@@ -529,6 +532,17 @@ _gateway: Optional[ClinicalDefenseGateway] = None
 _gateway_lock = threading.Lock()
 
 
+def _vision_adapter():
+    """The adapter that reads attached images, or None to use the protected model."""
+    from src.config import LLM_API_KEY, VISION_BASE_URL, VISION_MODEL
+
+    if not VISION_MODEL:
+        return None
+    from src.llm.adapters import OpenAIChatAdapter
+
+    return OpenAIChatAdapter(VISION_BASE_URL, VISION_MODEL, LLM_API_KEY)
+
+
 def get_gateway() -> ClinicalDefenseGateway:
     """Build the defense gateway once, around whatever model .env configures."""
     global _gateway
@@ -536,6 +550,7 @@ def get_gateway() -> ClinicalDefenseGateway:
         if _gateway is None:
             _gateway = ClinicalDefenseGateway(
                 llm=get_default_adapter(),
+                vision_llm=_vision_adapter(),
                 retriever=lambda query: retrieve_context(query, top_k=3),
                 toggles=PIPELINE_CONFIG,  # shared dict: admin toggles apply live
                 temperature=LLM_TEMPERATURE,
@@ -616,7 +631,12 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
             # Applies to every plain-language chat: patients always, and staff
             # who choose "Plain language" (so they can try the patient flow).
             message, clarify, answered, original, consult = req.message, None, None, None, False
-            if req.mode == "patient":
+            image = None
+            if req.image:
+                from src.security.image_guard import parse_data_url
+
+                image = parse_data_url(req.image)
+            if req.mode == "patient" and image is None:
                 from src.agents.clarify import combine_with_answers, is_symptom_complaint
 
                 original = _pending_clarification(db, conversation_id)
@@ -641,6 +661,7 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
                 retrieval_text=(f"{original or req.message}. Causes, home treatment and when to see a doctor"
                                 if consult else original),
                 consult=consult,
+                image=image,
             )
 
             shown_user_text = result.user_text
@@ -648,6 +669,8 @@ def _run_pipeline(req: ChatStreamRequest, conversation_id: int, sink: "queue.Que
                 from src.security.sanitize import sanitize_text
 
                 shown_user_text = sanitize_text(answered, max_chars=6000).model_text
+            if image is not None:
+                shown_user_text = f"{shown_user_text}\n\n_[image attached]_"
             _save_message(db, conversation_id, "user", shown_user_text)
             _save_message(db, conversation_id, "assistant", result.response_text, meta=result.meta)
             try:
@@ -676,6 +699,13 @@ async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(ge
     role = user_role(current_user.username)
     if role == "patient":
         req.mode = "patient"
+    if req.image:
+        from src.security.image_guard import parse_data_url
+
+        try:
+            parse_data_url(req.image)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     with Session(ENGINE) as db:
         if req.conversation_id:
             try:

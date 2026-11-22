@@ -21,6 +21,8 @@ export const STAGES = [
     plain: "A injection, B jailbreak templates, H harmful clinical intent, G Llama Guard" },
   { key: "clarify", n: null, phase: "request", label: "Follow-up", name: "Follow-up questions",
     plain: "Patient chat only: asks a few questions before answering a new symptom", optional: true },
+  { key: "image", n: null, phase: "request", label: "Image check", name: "Image check",
+    plain: "Only when an image is attached: a vision model describes it, and any sentence in it that reads as an instruction is removed before the assistant sees the description", optional: true },
   { key: "retrieve", n: 5, phase: "answer", label: "Retrieve", name: "Evidence retrieval",
     plain: "Finds relevant passages in the medical guideline corpus" },
   { key: "harden", n: 6, phase: "answer", label: "Harden", name: "Prompt hardening",
@@ -29,6 +31,8 @@ export const STAGES = [
     plain: "The protected medical model writes the answer" },
   { key: "verify", n: 8, phase: "check", label: "Grounding check", name: "Evidence-grounding check",
     plain: "Withholds answers (or removes claims) the evidence does not support" },
+  { key: "image_output", n: null, phase: "check", label: "Image instruction check", name: "Image instruction check",
+    plain: "Only when text was removed from an image: withholds an answer that carries out the removed instruction", optional: true },
   { key: "output_guard", n: 9, phase: "check", label: "Output guard", name: "Output guard",
     plain: "Llama Guard checks the answer itself for harmful content" },
 ];
@@ -74,6 +78,7 @@ export const TOGGLES = [
   { key: "layer_template_matcher", stage: 4, sub: true, label: "Layer B · Jailbreak templates", hint: "Similarity to known jailbreaks" },
   { key: "layer_harm_classifier", stage: 4, sub: true, label: "Layer H · Harmful clinical intent", hint: "Plainly worded harmful requests" },
   { key: "layer_llama_guard", stage: 4, sub: true, label: "Layer G · Llama Guard", hint: "Hazard categories on the user's message" },
+  { key: "layer_image_check", stage: 4, sub: true, label: "Image check", hint: "Instruction-like text read from attached images is removed" },
   { key: "layer_prompt_hardening", stage: 6, label: "Prompt hardening", hint: "Tagged delimiters and restated rules" },
   { key: "layer_output_guard", stage: 9, label: "Output guard", hint: "Llama Guard on the model's answer" },
 ];
