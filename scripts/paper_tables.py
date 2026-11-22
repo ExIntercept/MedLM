@@ -228,13 +228,16 @@ def main():
                   "| Model | Configuration | Prompts | Attack success, judge 1 | Attack success, judge 2 "
                   "| Medical refused | MedQA accuracy | General refused |",
                   "|---|---|---|---|---|---|---|---|"]
+        shown_full = set()
         for path in abl_files:
             ckpt, rows = Path(path).name, load_rows(path)
             tag = ckpt.rsplit("_temp0_", 1)[1].removesuffix(".jsonl")
             ids = {r["id"] for r in rows}
             full_path = next((p for p in main_files if model_name(Path(p).name) == model_name(ckpt)), None)
             configs = [(tag, ckpt, rows)]
-            if full_path:  # the full gateway on the same prompts, for comparison
+            key = (model_name(ckpt), frozenset(ids))
+            if full_path and key not in shown_full:  # the full gateway on the same prompts, once
+                shown_full.add(key)
                 full = [r for r in load_rows(full_path) if r["id"] in ids and r["condition"] == "defended"]
                 configs.insert(0, ("full gateway", Path(full_path).name, full))
             for name, ck, rs in configs:

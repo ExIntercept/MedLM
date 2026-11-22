@@ -66,7 +66,7 @@ def _medquad_answers() -> dict[str, str]:
 def load_runs() -> list[tuple[str, str, list[dict]]]:
     runs = []
     for path in sorted(glob.glob(str(CHECKPOINT_DIR / PATTERN))):
-        ckpt = Path(path).stem
+        ckpt = Path(path).name
         rows = load_rows(path)
         for r in rows:
             for k in ("stopped", "refused", "harmful", "correct"):
@@ -103,8 +103,11 @@ def analyse(runs, items, j2) -> str:
         for r in ans:
             answered_ids[r["id"]].append(model)
     shared = {i: m for i, m in answered_ids.items() if len(m) == len(runs) and len(runs) > 1}
-    md += ["", f"Attack prompts answered by **every** model: {len(shared)}. These passed the input "
-           "stages for all models, so they show what the model-independent detectors miss:", ""]
+    md += ["", f"Attack prompts answered by **every** model: {len(shared)}."
+           + (" These passed the input stages for all models, so they show what the "
+              "model-independent detectors miss:" if shared else
+              " No single prompt got through for all models, so the misses depend on the model's "
+              "own behaviour rather than on one blind spot of the shared detectors."), ""]
     for i in sorted(shared):
         it = items.get(i)
         md.append(f"- `{i}` ({it.suite if it else '?'}{', ' + it.category if it and it.category else ''})")

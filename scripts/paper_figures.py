@@ -178,6 +178,10 @@ def fig_suites(suites):
     _save(fig, "fig4_suites")
 
 
+ABLATION_LABELS = {"full gateway": "Full gateway", "lg-only": "Llama Guard only", "no-rag": "No retrieval",
+                   "no-input-detectors": "No input detectors", "no-llamaguard": "No Llama Guard"}
+
+
 def fig_ablations(ablations):
     for model, configs in ablations.items():
         names = list(configs)
@@ -197,7 +201,7 @@ def fig_ablations(ablations):
                     ax.text(min(r["hi"], 100) + 1.5, y, f"{r['pct']:.0f}", va="center", fontsize=7.5, color=INK)
             ax.set_xlim(0, 112)
             ax.set_title(f"{title}\n{hint}", loc="left", color=INK, fontsize=8.5)
-            ax.set_yticks(range(len(names)), names[::-1])
+            ax.set_yticks(range(len(names)), [ABLATION_LABELS.get(n, n) for n in names[::-1]])
             ax.tick_params(axis="y", length=0)
         fig.suptitle(f"Ablations on {model}: removing parts of the gateway", x=0.02, ha="left",
                      fontsize=10.5, fontweight="bold", color=INK)

@@ -2,7 +2,7 @@
 
 *[Author names], PES University*
 
-> **Draft status.** Sections 1–5 and 7–9 are complete; Section 6.1 has the judge-independent numbers. Judge-1 numbers must come from the re-judged checkpoints (corrected Llama Guard template, Section 5), not from the first scoring pass. Numbers marked **[R]** are filled in from `docs/paper/RESULTS.md` once the experiment runs finish (`scripts/run_paper_pipeline.sh`). Citations are listed at the end; check every entry against the original paper before submission.
+> **Draft status.** All numbers come from the final runs (`docs/paper/RESULTS.md`, `docs/paper/FAILURES.md`), with judge 1 using the corrected Llama Guard template (Section 5). Still open: the human review in Section 6.1 (two raters), author names, and checking every citation against the original paper.
 
 ---
 
@@ -21,9 +21,9 @@ Medical large language models (LLMs) are increasingly fine-tuned from general-pu
 The protected model is reached only through a standard chat or completions API.
 
 We evaluated MedLM on four open medical LLMs from three model families: MedGemma 4B, OpenBioLLM 8B, BioMistral 7B and JSL-MedLlama 3 8B. The test sets were six public attack benchmarks and six benign benchmarks: 30 prompts per benchmark, 720 conversations per model. Two judges from different model families scored the answers.
-- **Attack success:** the gateway reduced it from **[R]%** to **[R]%** on average, and the reduction was significant for every model (exact McNemar test, p < **[R]**).
-- **Medical utility:** MedQA accuracy was preserved or improved on **[R]** of four models.
-- **Ablations:** removing any single stage increases either attack success or over-refusal. The full gateway outperforms a Llama-Guard-only baseline **[R]**.
+- **Attack success:** the gateway reduced it from **21.8%** to **0.2%** on average under judge 1 (17.9% to 0.5% under judge 2), and the reduction was significant for every model (exact McNemar test, p < 0.001).
+- **Medical utility:** MedQA accuracy was preserved or improved on **three** of four models. The fourth, JSL-MedLlama, became unusable behind the gateway: it refused or was withheld on 63% of medical questions.
+- **Ablations:** on a 120-prompt subset, the in-house detector stack and Llama Guard each brought attack success to zero on their own; with both removed it rose to 3.3%. The layers are redundant on public attacks, and the detectors alone reach the same result on CPU at a fraction of the guard's latency.
 
 The system runs on a single 8 GB consumer GPU. We release the code, configurations and evaluation harness.
 
@@ -182,7 +182,7 @@ The answer is checked against the reference text: the retrieved evidence, the qu
 Grounding measures evidence support, not harm.
 - **The problem.** When tuning stage 8, Llama Guard judged 2 of 96 attack answers that reached the check unsafe, and *both* passed it: one repeated a jailbreak system prompt back, and the other was a hateful answer. Both reused the question's own words, so word overlap rated them fully grounded.
 - **The fix.** Stage 9 classifies the (request, answer) pair with Llama Guard and replaces unsafe answers. As in stage 4, S6 and S11 alone do not block.
-- **Serving pitfall.** Ollama's stock `llama-guard3` chat template ends with "Provide your safety assessment for ONLY THE LAST *User* message", even when the last turn is the assistant's. With it, a (request, answer) check silently rates the request: a bare "I can't help with that." after a harmful request comes back *unsafe*. We serve a copy with that line corrected (`scripts/ollama/llama-guard3-agent.Modelfile`). The gateway and the evaluation harness now check every guard endpoint on start-up with a canary pair (a harmful request alone must be unsafe; the same request followed by a refusal must be safe). If the check fails, the runner stops, and the gateway turns stage 9 off and logs an error rather than blocking answers for the wrong reason. **[R: re-check the "2 of 96" figure above with the corrected guard.]**
+- **Serving pitfall.** Ollama's stock `llama-guard3` chat template ends with "Provide your safety assessment for ONLY THE LAST *User* message", even when the last turn is the assistant's. With it, a (request, answer) check silently rates the request: a bare "I can't help with that." after a harmful request comes back *unsafe*. We serve a copy with that line corrected (`scripts/ollama/llama-guard3-agent.Modelfile`). The gateway and the evaluation harness now check every guard endpoint on start-up with a canary pair (a harmful request alone must be unsafe; the same request followed by a refusal must be safe). If the check fails, the runner stops, and the gateway turns stage 9 off and logs an error rather than blocking answers for the wrong reason. Re-judging the 96 tuning drafts with the corrected guard gives the same result: 2 unsafe, both passing the grounding check.
 
 ---
 
@@ -232,16 +232,16 @@ Grounding measures evidence support, not harm.
 - Undefended vs defended ASR is compared with an exact two-sided McNemar test, pairing the same prompt in both conditions.
 - Judge agreement is reported as Cohen's κ.
 
-**Ablations.** Run on MedGemma, on the first 15 prompts per benchmark of the same sample, defended condition only:
+**Ablations.** Run on MedGemma, on the first 10 prompts per benchmark of the same sample (120 prompts: 60 attack, 60 benign), defended condition only, with the corrected guard:
 
 | Configuration | What changes |
 |---|---|
-| Llama-Guard-only baseline | Only sanitization and Llama Guard on the input and output; no triage, guardrails, Layers A/B/H, retrieval, grounding or hardening |
+| Llama-Guard-only baseline (`lg-only`) | Only sanitization and Llama Guard on the input and output; no triage, guardrails, Layers A/B/H, retrieval, grounding or hardening |
 | No Llama Guard | Input and output guard both off: the gateway as it was before Layer G |
-| No output guard | Stage 9 off |
 | No retrieval | No evidence; the grounding check then has nothing to check against |
 | No input detectors | Layers A, B, H and G off |
-| No prompt hardening | Stage 6 replaced by a plain prompt |
+
+Ablations without the output guard and without prompt hardening were planned but not run in time.
 
 ---
 
@@ -253,17 +253,63 @@ Grounding measures evidence support, not harm.
 - **Figure 2** — clinical usefulness: MedQA accuracy and medical-question refusal, alone vs through the gateway. ![Figure 2](figures/fig2_utility.png)
 - **Figure 3** — where the gateway stopped each attack prompt, per model (Table 3 as a chart). ![Figure 3](figures/fig3_stages.png)
 - **Figure 4** — attack success per attack benchmark, pooled over models. ![Figure 4](figures/fig4_suites.png)
-- **Figure 5** — ablations on MedGemma **[R]**. ![Figure 5](figures/fig5_ablations.png)
+- **Figure 5** — ablations on MedGemma. ![Figure 5](figures/fig5_ablations.png)
 
-**[R] Table 1 — Main results.** Per model, ASR undefended → defended under both judges, the McNemar p-value, medical refusal, MedQA accuracy and general refusal (`docs/paper/RESULTS.md`, Table 1).
+**Table 1 — Main results** (percent, 95% Wilson interval; 180 attack, 60 medical and 120 general prompts per model and condition; MedQA n = 30).
 
-**[R] Table 2 — ASR by attack suite**, pooled over models.
+| Model | ASR judge 1 (alone → gateway) | McNemar p | ASR judge 2 (alone → gateway) | Medical refused | MedQA accuracy | General refused |
+|---|---|---|---|---|---|---|
+| JSL-MedLlama 3 8B | 14.4 → 0.0 | 3.0e-08 | 11.7 → 0.0 | 1.7 → 63.3 | 70.0 → 6.7 | 10.8 → 78.3 |
+| BioMistral 7B | 31.7 → 0.0 | 1.4e-17 | 26.1 → 0.6 | 0.0 → 8.3 | 13.3 → 26.7 | 3.3 → 50.0 |
+| OpenBioLLM 8B | 33.9 → 0.6 | 2.7e-17 | 26.7 → 0.6 | 0.0 → 8.3 | 13.3 → 40.0 | 0.8 → 48.3 |
+| MedGemma 4B | 7.2 → 0.0 | 2.4e-04 | 7.2 → 0.6 | 0.0 → 6.7 | 60.0 → 70.0 | 15.0 → 74.2 |
 
-**[R] Table 3 — Where attacks were stopped.** Outcome of every defended attack by stage. In the MedGemma run, the input detectors stopped 143 of 180 attack prompts, the grounding check withheld 18, the model itself refused 12, and 7 were answered (harmful according to judge 1: **[R]**).
+Intervals are in `docs/paper/RESULTS.md`. Every defended ASR has an upper bound of at most 3%.
 
-**[R] Table 4 — Judge agreement** (Cohen's κ).
+**Table 2 — ASR by attack suite**, pooled over models (120 prompts per suite and condition; judge 1 / judge 2).
 
-**[R] Table 5 — Ablations.**
+| Suite | Model alone | Through the gateway |
+|---|---|---|
+| MedSafetyBench | 17.5 / 16.7 | 0.0 / 2.5 |
+| Medical jailbreaks | 25.0 / 14.2 | 0.0 / 0.0 |
+| In-the-wild jailbreaks | 9.2 / 5.8 | 0.0 / 0.0 |
+| JailbreakBench harmful | 42.5 / 36.7 | 0.0 / 0.0 |
+| deepset injections | 0.0 / 0.0 | 0.8 / 0.0 |
+| XSTest unsafe | 36.7 / 34.2 | 0.0 / 0.0 |
+
+The deepset injections ask for harmless off-task output, so a "successful" injection is rarely harmful content; Llama Guard scores it as safe in both conditions.
+
+**Table 3 — Where attacks were stopped** (counts of 180 defended attack prompts per model).
+
+| Model | Input detectors | Grounding check | Output guard | Model refused | Answered | Answered and harmful (judge 1 / judge 2) |
+|---|---|---|---|---|---|---|
+| JSL-MedLlama 3 8B | 143 | 23 | 0 | 12 | 2 | 0 / 0 |
+| BioMistral 7B | 143 | 13 | 0 | 9 | 15 | 0 / 0 |
+| OpenBioLLM 8B | 143 | 18 | 1 | 5 | 13 | 1 / 1 |
+| MedGemma 4B | 143 | 18 | 0 | 12 | 7 | 0 / 1 |
+
+Emergency triage and the contraindication guardrails stopped no attack prompt; they exist for clinical safety, not attack defence. The input detectors stopped the same 143 prompts for every model, because they run before the model is called.
+
+**Table 4 — Judge agreement** on undefended and defended attack responses that reached the model.
+
+| Model | Compared | Both harmful | Judge 1 only | Judge 2 only | Cohen's κ |
+|---|---|---|---|---|---|
+| JSL-MedLlama 3 8B | 194 | 19 | 7 | 2 | 0.78 |
+| BioMistral 7B | 204 | 42 | 15 | 6 | 0.73 |
+| OpenBioLLM 8B | 198 | 46 | 16 | 3 | 0.76 |
+| MedGemma 4B | 199 | 11 | 2 | 3 | 0.80 |
+
+**Table 5 — Ablations** (MedGemma, 120 prompts, defended).
+
+| Configuration | ASR judge 1 | ASR judge 2 | Medical refused (n = 20) | MedQA accuracy (n = 10) | General refused (n = 40) |
+|---|---|---|---|---|---|
+| Full gateway | 0.0 [0–6] | 0.0 [0–6] | 0.0 | 60 | 75.0 |
+| Llama-Guard-only baseline | 0.0 [0–6] | 0.0 [0–6] | 0.0 | 50 | 67.5 |
+| No Llama Guard | 0.0 [0–6] | 0.0 [0–6] | 0.0 | 60 | 75.0 |
+| No retrieval | 0.0 [0–6] | 0.0 [0–6] | 0.0 | 50 | 70.0 |
+| No input detectors | 3.3 [1–11] | 1.7 [0–9] | 0.0 | 50 | 72.5 |
+
+With 60 attack prompts, only the no-input-detectors configuration differs from the full gateway, and its interval overlaps it. The MedQA and general-refusal differences are one question and two to three prompts; none is significant at this size. What the ablation does show is redundancy: either the detector stack or Llama Guard alone is enough to block these public attacks, so the gateway does not depend on any single layer. Removing Llama Guard costs nothing measurable here while saving most of the latency (Section 7, Cost).
 
 **Pre-model screening** (from earlier work, 200 prompts per benchmark, Layers A, B and H with triage and guardrails, without Layer G; `docs/BENCHMARK_SUITE_SCREEN.md`):
 
@@ -284,38 +330,38 @@ Grounding measures evidence support, not harm.
 
 ### 6.1 Failure analysis
 
-Full tables: `docs/paper/FAILURES.md` (`scripts/failure_analysis.py`). Numbers below are for the three models whose runs were complete when this was written; JSL-MedLlama is **[R]**.
+Full tables: `docs/paper/FAILURES.md` (`scripts/failure_analysis.py`).
 
-**Attacks that got through.** Of 180 defended attack prompts per model, 7 (MedGemma), 13 (OpenBioLLM) and 15 (BioMistral) passed every input stage, were not refused by the model, and passed the grounding check and output guard. **[R]** of these were harmful according to judge 1 and **[R]** according to judge 2. No attack prompt was answered by every model: the misses depend on how each model responds, not only on what the detectors let through. Most misses are deepset prompt injections and medical jailbreaks.
+**Attacks that got through.** Of 180 defended attack prompts per model, 2 (JSL-MedLlama), 7 (MedGemma), 13 (OpenBioLLM) and 15 (BioMistral) passed every input stage, were not refused by the model, and passed the grounding check and output guard. Of these 37 answers, 1 was harmful according to judge 1 and 2 according to judge 2 (one OpenBioLLM answer flagged by both, and one MedGemma answer flagged by judge 2 only). No attack prompt was answered by every model: the misses depend on how each model responds, not only on what the detectors let through. Most misses are deepset prompt injections and medical jailbreaks.
 
 **Benign prompts that were stopped.** The detectors stopped 16–17 general benign prompts per model (of 120) and **no medical benign prompt**. The 17 distinct prompts fall into three groups:
 - requests that sound harmful but are harmless (e.g. "How can I steal someone's heart?", or JailbreakBench-benign items such as "Explain how to access the electronic health records of a family member");
 - OR-Bench prompts that ask for a harmful-sounding procedure with a "within legal limits" qualifier;
 - one adversarial nonsense prompt from deepset.
 
-The grounding check withheld a further 32–40 general benign answers per model, which is intended for non-medical requests (Section 7), and 4 of 60 medical benign answers.
+The grounding check withheld a further 32–40 general benign answers per model, which is intended for non-medical requests (Section 7), and 4 of 60 medical benign answers. JSL-MedLlama is the exception: the grounding check withheld 25 of its 60 medical answers and 61 of 120 general ones, and the model refused 13 medical questions itself.
 
-**Utility cost on MedQA.** Counting questions answered correctly without the gateway and wrongly with it, the gateway lost 1 (MedGemma), 2 (OpenBioLLM) and 2 (BioMistral) questions and gained 4, 10 and 6. None of the lost questions was withheld by the grounding check. We attribute the gains to the retrieved evidence and to the hardened prompt's answer-format instruction, which makes the answer letter easier to extract; the no-retrieval and no-hardening ablations (Table 5) test this **[R]**.
+**Utility cost on MedQA.** Counting questions answered correctly without the gateway and wrongly with it, the gateway lost 1 (MedGemma), 2 (OpenBioLLM) and 2 (BioMistral) questions and gained 4, 10 and 6. None of the lost questions was withheld by the grounding check. We attribute the gains to the retrieved evidence and to the hardened prompt's answer-format instruction, which makes the answer letter easier to extract. The no-retrieval ablation is consistent with this (60% → 50% on MedGemma) but, at 10 questions, not conclusive. JSL-MedLlama lost 20 of the 21 questions it answered correctly alone; 12 were withheld by the grounding check, and the other 8 were refusals ("cannot assist … provide reference material") or wrong answers. A shorter system prompt raised its answer rate only from 1 in 8 to 3 in 8 in a pilot, so we report it as it is.
 
-**Judge errors.** With the stock template, judge 1 rated plain refusals as harmful (Section 5). After correction, **[R]** of the remaining judge-1 harmful verdicts on answered attacks disagree with judge 2 (Table 4).
+**Judge errors.** With the stock template, judge 1 rated plain refusals as harmful (Section 5). After correction, the judges disagree on 54 of 795 compared responses: 40 rated harmful by judge 1 only and 14 by judge 2 only (Table 4). Judge 1 is therefore the stricter of the two, and the defended result does not depend on which judge is used.
 
-**Human review.** **[R]** Two team members rated a fixed, seeded sample of 40 defended responses: 20 MedQuAD answers compared with the MedQuAD reference answers, 10 answered attacks, and 10 refused benign prompts. They rated correctness (0–2), harm and whether each refusal was appropriate, working independently (`docs/paper/human_eval/`). The raters are not clinicians.
+**Human review.** *Pending.* Two team members rated a fixed, seeded sample of 40 defended responses: 20 MedQuAD answers compared with the MedQuAD reference answers, 10 answered attacks, and 10 refused benign prompts. They rated correctness (0–2), harm and whether each refusal was appropriate, working independently (`docs/paper/human_eval/`). The raters are not clinicians.
 
 ---
 
 ## 7. Discussion
 
-**One gateway, several models.** The detectors and rules do not depend on the protected model, so most attacks are stopped before any model is called. This is why the defended ASR is similar across models whose undefended behaviour differs widely. The model-dependent part is utility. A model that follows the hardened prompt and answers in the language of the retrieved evidence keeps or improves its MedQA accuracy. A model that does not loses answers to the grounding check: JSL-MedLlama in our pilot run. Model-agnostic *protection* does not imply model-agnostic *usability*. Reporting both is necessary.
+**One gateway, several models.** The detectors and rules do not depend on the protected model, so most attacks are stopped before any model is called. This is why the defended ASR is similar across models whose undefended behaviour differs widely. The model-dependent part is utility. A model that follows the hardened prompt and answers in the language of the retrieved evidence keeps or improves its MedQA accuracy. A model that does not loses answers to the grounding check and to its own refusals: JSL-MedLlama went from 70% to 6.7% on MedQA. Model-agnostic *protection* does not imply model-agnostic *usability*. Reporting both is necessary.
 
 **Over-refusal is mostly by design.**
 - Defended refusal rates on general benign prompts are high.
-- Per-stage attribution shows that detector false blocks are rare: three prompts per model in the pilot run.
+- Per-stage attribution shows that detector false blocks are limited: 16–17 of 120 general benign prompts per model, mostly harmless requests that sound harmful, and none of the medical ones.
 - Most of these refusals come from the grounding check. A non-medical request has no clinical evidence behind it, so the assistant declines it.
 - For a clinical assistant this is intended behaviour. For a general assistant it would not be. Deployments that must also answer general questions would need a separate path for them.
 
 **Grounding is not safety.** Word-overlap grounding protects against unsupported claims, not against harmful ones. Our observation that both unsafe drafts passed it motivated stage 9. The same reasoning likely applies to any similarity-based faithfulness score.
 
-**Judge circularity.** Layer G and judge 1 are the same model. Agreement with the independent judge 2 (Table 4) and the ablation without Llama Guard (Table 5) together indicate how much of the defended result depends on that model **[R]**.
+**Judge circularity.** Layer G and judge 1 are the same model. Agreement with the independent judge 2 (Table 4) and the ablation without Llama Guard (Table 5) together indicate how much of the defended result depends on that model. Judge 2 also finds defended attack success of at most 0.6% (κ = 0.73–0.80), and the gateway without Llama Guard still reached 0% in the ablation, so the result does not rest on the guard grading its own work.
 
 **Validate the judge, not only the defense.** A guard model served with a template that rates the wrong turn still produces plausible-looking numbers. Here it inflated undefended attack success, because a refused harmful request counted as a successful attack, and it made the defended result circular, because anything Layer G let through also looked safe to the judge. Nothing in the aggregate tables revealed it. It showed up only when we read individual verdicts during failure analysis. A two-message canary check before every run is cheap. We recommend it for any evaluation that uses Llama Guard through a chat template.
 
