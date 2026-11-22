@@ -24,5 +24,8 @@ pandas>=2.2.0
 nltk>=3.8.0
 
 # Defense pipeline & scripts
+numpy>=1.26.0
+scikit-learn>=1.4.0      # scripts/train_harm_classifier.py
 datasets>=2.19.0
+matplotlib>=3.8.0        # scripts/paper_figures.py
 pytest>=8.0.0

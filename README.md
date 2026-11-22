@@ -18,6 +18,7 @@ The model itself is just an endpoint, reached through an OpenAI-compatible chat 
 ---
 
 ## 📑 Table of Contents
+0. [**Quick start: clone and run locally**](#-quick-start-clone-and-run-locally)
 1. [System Architecture](#-system-architecture)
 2. [End-to-End Pipeline Explanation](#-end-to-end-pipeline-explanation)
    - [Stage 0: Sanitization & Normalization (Layer S)](#stage-0-sanitization--normalization-layer-s)
@@ -30,7 +31,7 @@ The model itself is just an endpoint, reached through an OpenAI-compatible chat 
    - [Stage 7: Remote Inference Streaming (MedGemma)](#stage-7-remote-inference-streaming-medgemma)
    - [Stage 8: Post-Generation Evidence Grounding Audit](#stage-8-post-generation-evidence-grounding-audit)
 3. [Repository Structure](#-repository-structure)
-4. [Prerequisites & Environment Setup](#-prerequisites--environment-setup)
+4. [Other setups (Colab)](#%EF%B8%8F-other-setups)
 5. [How to Start the Project Up](#-how-to-start-the-project-up)
    - [Step 1: Start the Remote MedGemma Server (Google Colab)](#step-1-start-the-remote-medgemma-server-google-colab)
    - [Step 2: Configure Environment Variables (`.env`)](#step-2-configure-environment-variables-env)
@@ -417,25 +418,72 @@ MedGemmaLocal/
 
 ---
 
-## ⚙️ Prerequisites & Environment Setup
+## ⚡ Quick start: clone and run locally
 
-### 1. System Requirements
-- **OS**: macOS (Apple Silicon supported via MPS), Linux (Ubuntu 20.04+), or Windows (WSL2 recommended).
-- **Python**: Version `3.10` or `3.11`.
-- **Hardware**:
-  - Local machine: 8 GB+ RAM (loads DeBERTa-v3, MiniLM, and S-PubMedBERT).
-  - Remote/Colab GPU: T4, V100, A100, or L4 GPU for running MedGemma (`google/medgemma-4b-it`).
+Everything runs on one machine with [Ollama](https://ollama.com). This is the setup the paper results come from.
 
-### 2. Environment Setup
-Clone the repository and create a Python virtual environment:
+**You need**
+- Python 3.11 or newer (developed on 3.14), Node.js 20 or newer, and Ollama.
+- About 16 GB of RAM and 20 GB of free disk. A GPU with 8 GB of memory is recommended; on CPU only, answers take minutes instead of seconds.
+- An internet connection the first time, to download the models.
 
+**1. Get the code and the Python packages**
 ```bash
-cd MedGemmaLocal
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
+git clone https://github.com/ExIntercept/MedLM.git
+cd MedLM
+git checkout feature/paper-experiments
+python -m venv .venv
+source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+
+**2. Build the web interface**
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
+
+**3. Download the models into Ollama** (about 8 GB)
+```bash
+ollama pull hf.co/unsloth/medgemma-4b-it-GGUF:Q4_K_M
+ollama pull llama-guard3:8b
+ollama create llama-guard3-agent:8b -f scripts/ollama/llama-guard3-agent.Modelfile
+```
+The last command makes a copy of Llama Guard whose chat template checks the model's *answer*; Ollama's stock template only checks the user's message (see Layer G).
+
+**4. Configure**
+```bash
+cp .env.example .env               # Windows: copy .env.example .env
+```
+The defaults point at the local Ollama server. Change `APP_SECRET` to a long random string. `ADMIN_USERNAMES=admin` makes the account you sign up as `admin` an administrator.
+
+**5. Start**
+```bash
+uvicorn src.api.server:app --host 127.0.0.1 --port 8600
+```
+Open <http://127.0.0.1:8600>, choose **Create Account**, and sign up (as `admin` for the Admin Console). The first start downloads the detector and retrieval models from Hugging Face (about 2 GB) and takes a few minutes. A first-run tour shows what is where.
+
+On Windows, start Ollama from its desktop app rather than with `ollama serve`: a server started from a terminal stops when that terminal closes.
+
+**6. Check it works**
+```bash
+pytest -q
+```
+
+**What is in the repository:** the code, the trained Layer H classifier (`src/security/harm_classifier.npz`), the calibrated thresholds, Layer B's jailbreak templates, and the BM25 retrieval index (`corpus/`). Not included, and rebuilt or downloaded on demand: model weights, the benchmark datasets (`python scripts/fetch_benchmarks.py`), the local database and logs (`data/`, created on first start).
+
+**Reproducing the paper:** see [Running everything locally with Ollama](#running-everything-locally-with-ollama) and `scripts/run_paper_pipeline.sh`.
+
+---
+
+## ⚙️ Other setups
+
+The quick start above is the recommended path. The rest of this section covers serving the medical model from Google Colab instead.
+
+### Environment Setup
+Follow steps 1 and 2 of the quick start.
 
 ---
 
@@ -540,13 +588,13 @@ One consumer GPU is enough. The cross-model results below come from an RTX 4060 
 3. Start the server as in Step 3.
 4. To reproduce the cross-model benchmark:
    - `scripts/cross_model_local.json` lists the four models.
-   - `scripts/judge_local.json` uses Llama Guard 8B as the judge.
+   - `scripts/judge_local_agent.json` uses Llama Guard 8B (the fixed `llama-guard3-agent:8b` copy) as the judge; the runner refuses to start if the judge rates a bare refusal as unsafe.
    - Interrupted runs resume from their checkpoints.
 
    ```bash
    python scripts/fetch_benchmarks.py
    python scripts/run_benchmark_suite.py e2e --config scripts/cross_model_local.json \
-       --judge-config scripts/judge_local.json --limit 15 --out docs/e2e_local
+       --judge-config scripts/judge_local_agent.json --limit 15 --out docs/e2e_local
    ```
    This takes several hours for four models. Each model's answers are generated first, then judged in one pass, so the GPU swaps models as few times as possible.
 

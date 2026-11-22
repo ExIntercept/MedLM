@@ -18,7 +18,7 @@ build/
 *.env
 
 # Local Databases & Large Generated Vector Indices
-data/
+/data/
 chroma_db/
 *.sqlite3
 *.db
@@ -42,6 +42,8 @@ frontend/dist/
 src/security/data/*.npy
 src/security/data/*.json
 !src/security/thresholds.json
+# Layer B's reference templates are needed at runtime (the embeddings cache is rebuilt)
+!src/security/data/jailbreak_templates.jsonl
 src/security/data/corpus_full.jsonl
 .nltk_data/
 

@@ -247,6 +247,14 @@ Grounding measures evidence support, not harm.
 
 ## 6. Results
 
+**Figures** (`scripts/paper_figures.py`, rebuilt from `docs/paper/results.json`; PDF for the manuscript, PNG for slides):
+
+- **Figure 1** — attack success per model, model alone vs through the gateway, one panel per judge, with 95% intervals. ![Figure 1](figures/fig1_attack_success.png)
+- **Figure 2** — clinical usefulness: MedQA accuracy and medical-question refusal, alone vs through the gateway. ![Figure 2](figures/fig2_utility.png)
+- **Figure 3** — where the gateway stopped each attack prompt, per model (Table 3 as a chart). ![Figure 3](figures/fig3_stages.png)
+- **Figure 4** — attack success per attack benchmark, pooled over models. ![Figure 4](figures/fig4_suites.png)
+- **Figure 5** — ablations on MedGemma **[R]**. ![Figure 5](figures/fig5_ablations.png)
+
 **[R] Table 1 — Main results.** Per model, ASR undefended → defended under both judges, the McNemar p-value, medical refusal, MedQA accuracy and general refusal (`docs/paper/RESULTS.md`, Table 1).
 
 **[R] Table 2 — ASR by attack suite**, pooled over models.

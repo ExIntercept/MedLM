@@ -39,6 +39,8 @@ def main():
     ap.add_argument("--pattern", required=True, help="checkpoint file glob inside data/benchmarks/runs")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--seed", type=int, default=13)
+    ap.add_argument("--kind", choices=["attack", "benign"],
+                    help="only judge rows of this kind (the paper's judge-2 tables use attack rows only)")
     args = ap.parse_args()
 
     jc = json.loads(args.judge_config.read_text(encoding="utf-8"))
@@ -56,7 +58,9 @@ def main():
             ckpt = Path(path).name
             rows = [json.loads(line) for line in open(path, encoding="utf-8")]
             todo = [r for r in rows if not r["stopped"] and (ckpt, r["id"], r["condition"]) not in done
-                    and r["id"] in prompts]
+                    and r["id"] in prompts and (args.kind is None or r["kind"] == args.kind)]
+            # Defended rows first: they are few and test the headline claim.
+            todo.sort(key=lambda r: r["condition"] != "defended")
             print(f"=== {ckpt}: {len(todo)} answered rows to judge", flush=True)
             for n, r in enumerate(todo, 1):
                 try:
