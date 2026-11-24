@@ -142,6 +142,19 @@ def _score_sentence(sentence: str, pg=None, tm=None, thresholds: Optional[dict] 
     """
     if _INSTRUCTION_RE.search(sentence):
         return {"check": "pattern", "score": 1.0}
+    visible_text = re.match(
+        r"^\s*(?:[*_#>-]+\s*)?visible text\s*:?\s*(.+?)\.?$",
+        sentence,
+        re.IGNORECASE,
+    )
+    if visible_text:
+        payload = visible_text.group(1).strip()
+        if payload and _INSTRUCTION_RE.search(payload):
+            return {"check": "pattern", "score": 1.0}
+        # Printed clinical history or labels are evidence, not model instructions.
+        # Only the explicit instruction patterns above may quarantine visible text;
+        # running L1/L2 on the wrapper caused benign labels to be false positives.
+        return None
     quoted = [a or b for a, b in _QUOTED.findall(sentence)]
     if quoted:
         rest = _QUOTED.sub(" ", sentence)

@@ -61,6 +61,7 @@ def test_instructions_removed_findings_kept():
     "VISIBLE TEXT: none",
     "*   There is no visible text.",
     "Visible text: not visible",
+    "*   Visible text: Hx of Situs Inversus",
 ])
 def test_clinical_sentences_not_quarantined(sentence):
     assert check_description(sentence).quarantined == []
