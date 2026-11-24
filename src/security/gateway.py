@@ -369,6 +369,7 @@ class ClinicalDefenseGateway:
                 disable_layer_b=not self._on("layer_template_matcher"),
                 disable_layer_h=not self._on("layer_harm_classifier"),
                 disable_layer_g=not self._on("layer_llama_guard"),
+                session_id=str(conversation_id) if conversation_id is not None else None,
             )
             if self.log_decisions:
                 log_decision(decision, conversation_id, None, san.message.detector_text)
@@ -377,6 +378,8 @@ class ClinicalDefenseGateway:
                   pg_score=decision.pg_score, tm_max_sim=round(decision.tm_max_sim, 4),
                   tm_n_components=decision.tm_n_components, harm_score=decision.harm_score,
                   guard_unsafe=decision.guard_unsafe, guard_categories=decision.guard_categories,
+                  pg_smooth_mean=decision.pg_smooth_mean, pg_smooth_std=decision.pg_smooth_std,
+                  session_risk=decision.session_risk, fused_risk=decision.fused_risk,
                   top_templates=[{"family": t.get("family"), "sim": t.get("sim")}
                                  for t in (decision.top_templates or [])[:3]],
                   layer_ms=decision.latency_ms,
@@ -402,6 +405,10 @@ class ClinicalDefenseGateway:
                         "tm": decision.tm_max_sim,
                         "n_components": decision.tm_n_components,
                         "harm": decision.harm_score,
+                        "pg_smooth_mean": decision.pg_smooth_mean,
+                        "pg_smooth_std": decision.pg_smooth_std,
+                        "session_risk": decision.session_risk,
+                        "fused_risk": decision.fused_risk,
                     },
                     steps=steps,
                 )
@@ -746,7 +753,8 @@ def _check_output(user_text: str, answer: str):
 def _format_evidence(evidence: Evidence) -> str:
     out = ""
     for idx, (_, text, meta) in enumerate(evidence, 1):
-        out += f"### [Evidence {idx}] {meta.get('title', 'Guideline')} (`{meta.get('source', '')}`)\n"
+        source = "image_derived" if meta.get("source") == "uploaded image" else "retrieved"
+        out += f"### [Evidence {idx}|source={source}] {meta.get('title', 'Guideline')} (`{meta.get('source', '')}`)\n"
         out += f"*MedCPT Rerank Score:* `{meta.get('cross_score', 0):.4f}`\n\n> {text}\n\n---\n"
     return out
 

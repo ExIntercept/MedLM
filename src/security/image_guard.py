@@ -155,6 +155,14 @@ def _score_sentence(sentence: str, pg=None, tm=None, thresholds: Optional[dict] 
 
 def _score_part(sentence: str, pg=None, tm=None, thresholds: Optional[dict] = None) -> Optional[dict]:
     th = thresholds or {"pg_flag": 0.5, "tm_flag": 0.68}
+    no_visible_text = re.match(
+        r"^\s*(?:[*_#>-]+\s*)?(?:visible text\s*:?\s*(?:none|not visible|n/?a)|"
+        r"(?:there is )?no visible text)\.?$",
+        sentence,
+        re.IGNORECASE,
+    )
+    if no_visible_text:
+        return None
     # The classifiers are unreliable on fragments: Layer A scores headings such
     # as "VISIBLE TEXT:" and labels such as "L R PA view" as injections. Only
     # sentences of five words or more go to them.

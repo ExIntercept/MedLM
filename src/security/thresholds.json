@@ -6,6 +6,9 @@
   "tau_component": 0.62,
   "components_block": 3,
   "components_flag": 2,
+  "session_block": 0.55,
+  "smooth_block": 0.90,
+  "smooth_flag": 0.50,
   "_meta": {
     "calibrated_at": "2026-10-14T20:03:37.554276+00:00",
     "val_templates_evaluated": 31,

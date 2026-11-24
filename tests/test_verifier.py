@@ -30,3 +30,14 @@ def test_pass_threshold_override():
 
 def test_no_evidence_is_ungrounded():
     assert verify_evidence(ANSWER, [], VIGNETTE, options=OPTIONS)["status"] == "UNGROUNDED"
+
+
+def test_conflicting_negation_is_not_grounded():
+    evidence = [("c1", "The patient has no contraindication to methadone.", {})]
+    audit = verify_evidence(
+        "Methadone is contraindicated for this patient.",
+        evidence,
+        "The patient is asking about methadone.",
+    )
+    assert audit["status"] == "FLAGGED"
+    assert audit["score"] == 0.0

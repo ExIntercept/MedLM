@@ -91,6 +91,10 @@ def main():
             "action": dec.action,
             "tm_max_sim": dec.tm_max_sim,
             "tm_n_components": dec.tm_n_components,
+            "pg_smooth_mean": dec.pg_smooth_mean,
+            "pg_smooth_std": dec.pg_smooth_std,
+            "fused_risk": dec.fused_risk,
+            "session_risk": dec.session_risk,
             "latency_ms": elapsed_ms,
         }
         attack_results.append(res)

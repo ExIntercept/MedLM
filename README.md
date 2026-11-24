@@ -13,7 +13,9 @@ The model itself is just an endpoint, reached through an OpenAI-compatible chat 
 - **With the gateway**, they succeeded on **0%** for every model.
 - MedQA accuracy was kept, except for one model; see [Results across medical models](#-results-across-medical-models).
 
-**Scope: text only.** The gateway accepts and checks text. It has no image input, so it does not defend vision-language (VLM) use.
+**Scope: text plus optional image description.** The gateway accepts images, asks a vision model to describe them, and passes only a sentence-checked description to the protected text model. It is a bounded prompt-injection mitigation stage, not a clinically validated vision diagnosis pipeline.
+
+**Cross-turn and provenance defenses.** Detector risk is accumulated with a session EWMA, Prompt Guard scores include perturbation smoothing, and retrieved/image content is labeled as tainted evidence rather than trusted instructions.
 
 ---
 
@@ -699,6 +701,7 @@ Full per-suite tables: [`docs/e2e_local/BENCHMARK_SUITE_E2E.md`](docs/e2e_local/
 - **Images are checked only through their description.** The image check can remove an instruction only if the vision model writes it down. A vision model that silently follows printed text is caught only if the answer repeats the removed instruction. The image stage was tested on synthetic X-rays, not real clinical images.
 - **Llama Guard plays two roles.** The same Llama Guard 8B model is both a defense layer (G) and judge 1. A second judge from another model family (Qwen3-8B) agrees with it (κ 0.73–0.80); see `docs/paper/RESULTS.md`.
 - **Small samples.** 30 prompts per benchmark and model (temperature 0, seed 13), so intervals are wide. Read differences between models as patterns, not exact rates.
+- **Not a medical device.** The system requires clinical governance, privacy controls, incident procedures, external validation and human oversight before any production use.
 - **Non-medical prompts are declined by design.** A high refusal rate on general prompts is expected from a clinical assistant. It would be a problem for a general-purpose chatbot.
 - **Models tested.**
   - Only 4–8B quantized models were tested.

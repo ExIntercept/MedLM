@@ -59,6 +59,8 @@ def test_instructions_removed_findings_kept():
     "The heart size appears normal.",
     "No pleural effusion or pneumothorax.",
     "VISIBLE TEXT: none",
+    "*   There is no visible text.",
+    "Visible text: not visible",
 ])
 def test_clinical_sentences_not_quarantined(sentence):
     assert check_description(sentence).quarantined == []

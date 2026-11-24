@@ -107,6 +107,9 @@ def main():
         "tau_component": 0.62,
         "components_block": 3,
         "components_flag": 2,
+        "session_block": 0.55,
+        "smooth_block": 0.90,
+        "smooth_flag": 0.50,
     }
     
     # Evaluate attack templates with baseline defaults

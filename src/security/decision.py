@@ -6,6 +6,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+import random
+import statistics
+import string
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
@@ -27,6 +30,9 @@ DEFAULT_THRESHOLDS: dict = {
     "tau_component": 0.65,
     "components_block": 3,
     "components_flag": 2,
+    "session_block": 0.55,
+    "smooth_block": 0.90,
+    "smooth_flag": 0.50,
 }
 
 
@@ -75,6 +81,14 @@ class DefenseDecision:
 
     guard_categories: Optional[list] = None
     """Llama Guard hazard codes, e.g. ["S1"]."""
+    pg_smooth_mean: Optional[float] = None
+    """Prompt Guard mean over smoothed character perturbations."""
+    pg_smooth_std: Optional[float] = None
+    """Prompt Guard score instability across perturbations."""
+    session_risk: float = 0.0
+    """EWMA risk across turns in the current conversation."""
+    fused_risk: float = 0.0
+    """Domain-fused detector risk score."""
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +115,36 @@ def load_thresholds(path: Path) -> dict:
     return thresholds
 
 
+def _smoothed_prompt_guard(prompt_guard, text: str, copies: int = 4, q: float = 0.08) -> tuple[float, float]:
+    """Score small character perturbations with Prompt Guard."""
+    if not text.strip():
+        return 0.0, 0.0
+    alphabet = string.ascii_letters + string.digits + string.punctuation + " "
+    rng = random.Random(0)
+    variants = []
+    source = text[:2000]
+    for index in range(max(1, copies)):
+        chars = list(source)
+        count = max(1, int(len(chars) * q))
+        positions = rng.sample(range(len(chars)), min(count, len(chars)))
+        mode = index % 3
+        if mode == 0:
+            for pos in positions:
+                chars[pos] = rng.choice(alphabet)
+        elif mode == 1:
+            for _ in range(count):
+                chars.insert(rng.randrange(len(chars) + 1), rng.choice(alphabet))
+        else:
+            start = rng.randrange(max(1, len(chars) - count + 1))
+            chars[start:start + count] = [rng.choice(alphabet) for _ in range(count)]
+        variants.append("".join(chars))
+    results = prompt_guard.score_many(variants)
+    scores = [r.max_score for r in results if r.max_score is not None]
+    if not scores:
+        return 0.0, 0.0
+    return float(statistics.mean(scores)), float(statistics.pstdev(scores))
+
+
 # ---------------------------------------------------------------------------
 # Main defense function
 # ---------------------------------------------------------------------------
@@ -112,6 +156,7 @@ def run_input_defenses(
     disable_layer_b: bool = False,
     disable_layer_h: bool = False,
     disable_layer_g: bool = False,
+    session_id: Optional[str] = None,
 ) -> DefenseDecision:
     """Run Layer A (Prompt Guard), Layer B (Template Matcher) and Layer H
     (harmful-intent classifier) on sanitized inputs.
@@ -165,6 +210,7 @@ def run_input_defenses(
             disable_layer_b=disable_layer_b,
             disable_layer_h=disable_layer_h,
             disable_layer_g=disable_layer_g,
+            session_id=session_id,
         )
     except Exception as exc:
         logger.exception("Unexpected error in defense pipeline: %s", exc)
@@ -196,6 +242,7 @@ def _run_defenses_inner(
     disable_layer_b: bool = False,
     disable_layer_h: bool = False,
     disable_layer_g: bool = False,
+    session_id: Optional[str] = None,
 ) -> DefenseDecision:
     """Internal implementation; called from inside the try/except in run_input_defenses."""
     from pathlib import Path as _Path
@@ -247,6 +294,8 @@ def _run_defenses_inner(
     pg_unavailable = True
     pg_ms = 0.0
     pg_results: list = []
+    pg_smooth_mean: Optional[float] = None
+    pg_smooth_std: Optional[float] = None
 
     if not disable_layer_a:
         pg = get_prompt_guard(prompt_guard_model_id, device)
@@ -255,6 +304,8 @@ def _run_defenses_inner(
             pg_results = pg.score_many(texts)  # type: ignore[union-attr]
             scores = [r.max_score for r in pg_results if r.max_score is not None]
             pg_score = max(scores) if scores else None
+            if text_message.strip():
+                pg_smooth_mean, pg_smooth_std = _smoothed_prompt_guard(pg, text_message)
         pg_ms = (time.perf_counter() - t_pg_start) * 1000.0
 
     # ------------------------------------------------------------------
@@ -344,6 +395,27 @@ def _run_defenses_inner(
     latency_ms = {"pg": round(pg_ms, 1), "tm": round(tm_ms, 1), "harm": round(harm_ms, 1),
                   "guard": guard.latency_ms if guard else 0.0, "total": round(total_ms, 1)}
 
+    import math
+    fused_logit = (
+        -4.5
+        + 4.0 * (pg_score or 0.0)
+        + 3.0 * (pg_smooth_mean or 0.0)
+        + 1.5 * tm_max_sim
+        + 1.5 * (tm_n_components / 9.0)
+        + 2.5 * (harm_score or 0.0)
+        + 3.0 * (1.0 if guard is not None and guard.unsafe else 0.0)
+    )
+    fused_risk = 1.0 / (1.0 + math.exp(-max(-60.0, min(60.0, fused_logit))))
+
+    current_session_risk = 0.0
+    if session_id:
+        from src.security.session_risk import session_risk
+        current_session_risk = session_risk.update(
+            session_id,
+            max(fused_risk, pg_score or 0.0, tm_max_sim, harm_score or 0.0),
+        )
+    session_block = float(thresholds.get("session_block", 0.55))
+
     # ------------------------------------------------------------------
     # Decision logic
     # ------------------------------------------------------------------
@@ -366,6 +438,12 @@ def _run_defenses_inner(
     if guard is not None and guard.blocks:
         do_block = True
         reasons.append("guard_block")
+    if pg_smooth_mean is not None and pg_smooth_mean >= float(thresholds.get("smooth_block", 0.90)):
+        do_block = True
+        reasons.append("pg_smooth_block")
+    if current_session_risk >= session_block:
+        do_block = True
+        reasons.append("session_risk_block")
 
     # FLAG conditions
     do_flag = False
@@ -384,6 +462,9 @@ def _run_defenses_inner(
     if any(n.startswith("control_token:") for n in sanitize_notes):
         do_flag = True
         reasons.append("control_token_detected")
+    if pg_smooth_mean is not None and pg_smooth_mean >= float(thresholds.get("smooth_flag", 0.50)):
+        do_flag = True
+        reasons.append("pg_smooth_flag")
 
     # Determine action
     if do_block:
@@ -458,4 +539,8 @@ def _run_defenses_inner(
         harm_score=round(harm_score, 4) if harm_score is not None else None,
         guard_unsafe=guard.unsafe if guard else None,
         guard_categories=guard.categories if guard else None,
+        pg_smooth_mean=round(pg_smooth_mean, 4) if pg_smooth_mean is not None else None,
+        pg_smooth_std=round(pg_smooth_std, 4) if pg_smooth_std is not None else None,
+        session_risk=round(current_session_risk, 4),
+        fused_risk=round(fused_risk, 4),
     )

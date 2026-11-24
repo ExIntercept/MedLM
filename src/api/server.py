@@ -22,6 +22,7 @@ from src.auth.dependencies import get_current_user
 from src.auth.security import create_access_token, hash_password, verify_password
 from src.config import (
     ADMIN_USERNAMES,
+    CORS_ORIGINS,
     DOCS_DIR,
     LLM_MODEL,
     LLM_PROVIDER,
@@ -42,14 +43,7 @@ app = FastAPI(title="Medical RAG & MedGemma Clinical API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8600",
-        "http://127.0.0.1:8600",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -410,8 +404,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db_session)):
     username = payload.username.strip()
     if len(username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
-    if len(payload.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if len(payload.password) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
 
     existing = db.exec(select(ApiUser).where(ApiUser.username == username)).first()
     if existing:
@@ -479,6 +473,8 @@ def new_conversation(
     db.add(conv)
     db.commit()
     db.refresh(conv)
+    from src.security.session_risk import session_risk
+    session_risk.reset(str(conv.id))
     return {"conversation_id": conv.id, "title": title}
 
 
@@ -723,6 +719,8 @@ async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(ge
                 db.commit()
                 db.refresh(conv)
                 conversation_id = conv.id
+                from src.security.session_risk import session_risk
+                session_risk.reset(str(conversation_id))
         else:
             title = req.message.strip().splitlines()[0][:60] if req.message.strip() else "New Consultation"
             profile_json = json.dumps(req.patient_profile.model_dump()) if req.patient_profile else None
@@ -731,6 +729,8 @@ async def chat_stream(req: ChatStreamRequest, current_user: ApiUser = Depends(ge
             db.commit()
             db.refresh(conv)
             conversation_id = conv.id
+            from src.security.session_risk import session_risk
+            session_risk.reset(str(conversation_id))
 
     sink: "queue.Queue" = queue.Queue()
     threading.Thread(target=_run_pipeline, args=(req, conversation_id, sink, current_user.username, role, current_user.id), daemon=True).start()

@@ -26,6 +26,20 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
+APP_ENV = os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "development")).strip().lower()
+PRODUCTION = APP_ENV in {"production", "prod"}
+
+
+def require_production_secret(name: str, value: str, *, insecure_values: set[str] | None = None) -> str:
+    """Fail closed when production starts without a real application secret."""
+    insecure = insecure_values or set()
+    if PRODUCTION and (not value or value in insecure or len(value) < 32):
+        raise RuntimeError(
+            f"{name} must be set to a cryptographically random value of at least 32 characters "
+            "before starting in production."
+        )
+    return value
+
 # Remote Colab ngrok endpoint for MedGemma
 COLAB_API_BASE = os.environ.get("COLAB_API_BASE", "").rstrip("/")
 COLAB_API_KEY = os.environ.get("COLAB_API_KEY", "")
@@ -62,14 +76,45 @@ LLM_SYSTEM_ROLE = os.environ.get("LLM_SYSTEM_ROLE", "1") == "1"
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
 
 # Auth secrets
-JWT_SECRET = os.environ.get("JWT_SECRET", os.environ.get("APP_SECRET", "dev-only-insecure-secret-change-in-production"))
+JWT_SECRET = require_production_secret(
+    "JWT_SECRET or APP_SECRET",
+    os.environ.get("JWT_SECRET") or os.environ.get("APP_SECRET", "dev-only-insecure-secret-change-in-production"),
+    insecure_values={
+        "dev-only-insecure-secret-change-in-production",
+        "dev-secret-change-me",
+        "change-me",
+        "change-me-to-something-random",
+    },
+)
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "60"))
 ADMIN_USERNAMES = {
     username.strip()
     for username in os.environ.get("ADMIN_USERNAMES", "").split(",")
     if username.strip()
 }
+
+CLINICIAN_USERNAMES = {
+    username.strip()
+    for username in os.environ.get("CLINICIAN_USERNAMES", "").split(",")
+    if username.strip()
+}
+
+# Explicit origins are required outside local development.
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8600",
+    "http://127.0.0.1:8600",
+]
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", ",".join(DEFAULT_CORS_ORIGINS)).split(",")
+    if origin.strip()
+]
+if PRODUCTION:
+    if "*" in CORS_ORIGINS:
+        raise RuntimeError("CORS_ORIGINS='*' is not allowed in production.")
 
 # ── Defense / Security pipeline ──────────────────────────────────────────────
 # Set DEFENSE_ENABLED=0 in .env to disable all layers (useful for ablation).
