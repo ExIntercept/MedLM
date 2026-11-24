@@ -637,11 +637,10 @@ class ClinicalDefenseGateway:
         draft_text = answer
         withheld = audit["status"] == "FLAGGED"
         redacted = 0
-        if withheld and consult and audit.get("verified_claims"):
-            # Consultation answers are checked claim by claim: unsupported
-            # sentences are dropped and the rest shown, rather than all or
-            # nothing. Stricter than the 50% rule, which shows every sentence
-            # once half are grounded.
+        if withheld and audit.get("verified_claims"):
+            # Keep grounded claims instead of discarding the whole answer.
+            # This applies to consultations and normal clinical QA, while an
+            # answer with no supported claims remains withheld.
             answer, redacted = _keep_verified(answer, audit)
             withheld = redacted < 0
             if withheld:

@@ -22,6 +22,7 @@ import base64
 import logging
 import re
 import time
+import io
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -119,9 +120,19 @@ def parse_data_url(data_url: str) -> tuple[str, str]:
 
 def describe_image(adapter, mime: str, b64: str, max_tokens: int = 400) -> str:
     """Ask a vision-capable chat model to describe the image."""
+    vision_mime, vision_b64 = mime, b64
+    if mime == "image/webp":
+        from PIL import Image
+
+        raw = base64.b64decode(b64)
+        image = Image.open(io.BytesIO(raw)).convert("RGB")
+        jpeg = io.BytesIO()
+        image.save(jpeg, format="JPEG", quality=90)
+        vision_mime = "image/jpeg"
+        vision_b64 = base64.b64encode(jpeg.getvalue()).decode()
     messages = [{"role": "user", "content": [
         {"type": "text", "text": DESCRIBE_PROMPT},
-        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        {"type": "image_url", "image_url": {"url": f"data:{vision_mime};base64,{vision_b64}"}},
     ]}]
     return "".join(adapter.stream(messages, temperature=0.0, max_tokens=max_tokens)).strip()
 

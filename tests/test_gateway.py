@@ -318,6 +318,12 @@ def test_unknown_model_uses_fallbacks():
     assert (p.template, p.context_window) == ("chatml", 16384)
 
 
+def test_jsl_medllama_profile_uses_compact_prompt():
+    p = resolve_profile("hf.co/bartowski/JSL-MedLlama-3-8B-v2.0-GGUF:Q4_K_M")
+    assert p.family == "Medical Llama 3 fine-tune"
+    assert p.compact_prompt is True
+
+
 def test_factory_configures_adapter_from_profile():
     a = for_medical_model("BioMistral/BioMistral-7B", "http://x", provider="openai_chat")
     assert a.system_role is False
@@ -472,8 +478,9 @@ def test_consult_answers_skip_safety_net_lines_when_grounding(stub_detectors):
     )
     plain = _gateway(RecordingModel(answer=answer)).run("How is asthma managed?")
     consult = _gateway(RecordingModel(answer=answer)).run("How is asthma managed?", consult=True)
-    assert plain.withheld                      # safety lines count against the plain answer
-    assert not consult.withheld                # but not against a consultation answer
+    assert not plain.withheld
+    assert not consult.withheld
+    assert "Inhaled corticosteroids" in plain.response_text
     assert "Get urgent help now if" in consult.response_text
 
 
